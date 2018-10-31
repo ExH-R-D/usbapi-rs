@@ -1,5 +1,6 @@
 extern crate nix;
 use nix::sys::ioctl;
+use std::slice::Iter;
 use std::io;
 use std::fs::{self,DirEntry, File};
 use std::path::Path as Path;
@@ -24,7 +25,7 @@ struct DeviceDescriptor {
     iproduct: u8,
     iserial_number: u8,
     num_configurations: u8,
-    configurations: Vec<u8>
+    pub configurations: Vec<ConfigurationDescriptor>
 }
 
 struct ConfigurationDescriptor {
@@ -33,76 +34,82 @@ struct ConfigurationDescriptor {
     total_length: u16,
     num_interfaces: u8,
     configuration_value: u8,
+    iconfiguration: u8,
     bmattributes: u8,
     max_power: u8,
-    extra: Vec<u8>
 }
 
 impl fmt::Display for DeviceDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut d = format!("length: {}\n", self.length);
-        d+=&format!("descriptor_type: {}\n", self.descriptor_type);
-        d+=&format!("bcd_usb: {:04X}\n", self.bcd_usb);
-        d+=&format!("device_class: {}\n", self.device_class);
-        d+=&format!("device_sub_class: {}\n", self.device_sub_class);
-        d+=&format!("device_protocol: {}\n", self.device_protocol);
-        d+=&format!("max_packet_size: {}\n", self.max_packet_size0);
-        d+=&format!("id_vendor: 0x{:04X}\n", self.id_vendor);
-        d+=&format!("id_product: 0x{:04X}\n", self.id_product);
-        d+=&format!("bcd_device: 0x{:04X}\n", self.bcd_device);
-        d+=&format!("imanufacturer: {}\n", self.imanufacturer);
-        d+=&format!("iproduct: {}\n", self.iproduct);
-        d+=&format!("iserial_number: {}\n", self.iserial_number);
-        d+=&format!("num_configurations: {}\n", self.num_configurations);
-        d+=&format!("configurations: {:02X?}\n", self.configurations);
+        let mut d = format!("bLength: {}\n", self.length);
+        d+=&format!("bDescriptorType: {}\n", self.descriptor_type);
+        d+=&format!("bcdUsb: 0x{:04x}\n", self.bcd_usb);
+        d+=&format!("bDeviceClass: {}\n", self.device_class);
+        d+=&format!("bDeviceSubClass: {}\n", self.device_sub_class);
+        d+=&format!("bDeviceProtocol: {}\n", self.device_protocol);
+        d+=&format!("bMaxPacketSize: {}\n", self.max_packet_size0);
+        d+=&format!("idVendor: 0x{:04x}\n", self.id_vendor);
+        d+=&format!("idProduct: 0x{:04x}\n", self.id_product);
+        d+=&format!("bcdDevice: 0x{:04x}\n", self.bcd_device);
+        d+=&format!("iManufacturer: {}\n", self.imanufacturer);
+        d+=&format!("iProduct: {}\n", self.iproduct);
+        d+=&format!("iSerialNumber: {}\n", self.iserial_number);
+        d+=&format!("bNumConfigurations: {}\n", self.num_configurations);
+        for conf in &self.configurations {
+            d+=&format!("{}", conf);
+        }
+        write!(f, "{}", d)
+    }
+}
 
+impl fmt::Display for ConfigurationDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut d = format!("bLength: {}\n", self.length);
+        d+=&format!("bDescriptorType: {}\n", self.descriptor_type);
+        d+=&format!("bTotalLength: {}\n", self.total_length);
+        d+=&format!("bNumInterfaces: {}\n", self.num_interfaces);
+        d+=&format!("bConfigurationValue: {}\n", self.configuration_value);
+        d+=&format!("iConfiguration: {}\n", self.iconfiguration);
+        d+=&format!("bmAttributes: 0x{:02x}\n", self.bmattributes);
+        d+=&format!("bMaxPower: {}\n", self.max_power);
         write!(f, "{}", d)
     }
 }
 
 impl DeviceDescriptor {
-    fn new(data: Vec<u8>) -> Self {
-        let mut desc = DeviceDescriptor {
-            length: 0,
-            descriptor_type: 0,
-            bcd_usb: 0,
-            device_class: 0,
-            device_sub_class: 0,
-            device_protocol: 0,
-            max_packet_size0: 0,
-            id_vendor: 0,
-            id_product: 0,
-            bcd_device: 0,
-            imanufacturer: 0,
-            iproduct: 0,
-            iserial_number: 0,
-            num_configurations: 0,
+    fn new(iter: &mut Iter<u8>) -> Self {
+        DeviceDescriptor {
+            length: (iter.len() + 2) as u8,
+            descriptor_type: 1,
+            bcd_usb: *iter.next().unwrap_or(&0) as u16 | (*iter.next().unwrap_or(&0) as u16) << 8,
+            device_class: *iter.next().unwrap_or(&0),
+            device_sub_class: *iter.next().unwrap_or(&0),
+            device_protocol: *iter.next().unwrap_or(&0),
+            max_packet_size0: *iter.next().unwrap_or(&0),
+            id_vendor: *iter.next().unwrap_or(&0) as u16 | (*iter.next().unwrap_or(&0) as u16) << 8,
+            id_product: (*iter.next().unwrap_or(&0) as u16) | (*iter.next().unwrap_or(&0) as u16) << 8,
+            bcd_device: *iter.next().unwrap_or(&0) as u16 | (*iter.next().unwrap_or(&0) as u16) << 8,
+            imanufacturer: *iter.next().unwrap_or(&0),
+            iproduct: *iter.next().unwrap_or(&0),
+            iserial_number: *iter.next().unwrap_or(&0),
+            num_configurations: *iter.next().unwrap_or(&0),
             configurations: vec![]
-        };
-
-        let mut iter = data.iter();
-        desc.length = *iter.next().unwrap_or(&0);
-        desc.descriptor_type = *iter.next().unwrap_or(&0);
-        desc.bcd_usb = *iter.next().unwrap_or(&0) as u16;
-        desc.bcd_usb|= (*iter.next().unwrap_or(&0) as u16) << 8;
-        desc.device_class = *iter.next().unwrap_or(&0);
-        desc.device_sub_class = *iter.next().unwrap_or(&0);
-        desc.device_protocol = *iter.next().unwrap_or(&0);
-        desc.max_packet_size0 = *iter.next().unwrap_or(&0);
-        desc.id_vendor = *iter.next().unwrap_or(&0) as u16;
-        desc.id_vendor |= (*iter.next().unwrap_or(&0) as u16) << 8;
-        desc.id_product = (*iter.next().unwrap_or(&0) as u16);
-        desc.id_product |= (*iter.next().unwrap_or(&0) as u16) << 8;
-        desc.bcd_device = *iter.next().unwrap_or(&0) as u16;
-        desc.bcd_device|= (*iter.next().unwrap_or(&0) as u16) << 8;
-        desc.imanufacturer = *iter.next().unwrap_or(&0);
-        desc.iproduct = *iter.next().unwrap_or(&0);
-        desc.iserial_number = *iter.next().unwrap_or(&0);
-        desc.num_configurations = *iter.next().unwrap_or(&0);
-        for d in iter {
-            desc.configurations.push(*d);
         }
-        desc
+    }
+}
+
+impl ConfigurationDescriptor {
+    fn new(iter: &mut Iter<u8>) -> Self {
+        ConfigurationDescriptor {
+            length: iter.len() as u8,
+            descriptor_type: 2,
+            total_length: *iter.next().unwrap_or(&0) as u16 | (*iter.next().unwrap_or(&0) as u16) << 8,
+            num_interfaces: *iter.next().unwrap_or(&0),
+            configuration_value: *iter.next().unwrap_or(&0),
+            iconfiguration: *iter.next().unwrap_or(&0),
+            bmattributes: *iter.next().unwrap_or(&0),
+            max_power: *iter.next().unwrap_or(&0)
+        }
     }
 }
 
@@ -129,7 +136,7 @@ impl LinuxUsbDevices {
     }
 
     pub fn device(&mut self, file: &DirEntry, bus: i16, address: i16) {
-        let mut file = File::open(file.path());
+        let file = File::open(file.path());
         let mut file = match file {
             Ok(file) => file,
             Err(e) => {
@@ -138,9 +145,30 @@ impl LinuxUsbDevices {
             }
         };
 
+        // FIME This madness can seriosly be done better
+        // Need to read some more vec/iterator tutorials.
         let mut data = vec![];
         file.read_to_end(&mut data).expect("Failed to read");
-        let desc = DeviceDescriptor::new(data);
+        let mut iter = data.iter();
+        let dlength = *iter.next().unwrap_or(&0) as usize;
+        let typ = *iter.next().unwrap_or(&0);
+        // This feels awkward should use take(dlength) or similar here...
+        let mut iter_desc = data[2..dlength].iter();
+        let mut desc = DeviceDescriptor::new(&mut iter_desc);
+        let mut confs = desc.num_configurations;
+        let mut start = dlength;
+        while confs > 0 {
+            confs-= 1;
+            let mut iter = data[start..start+2].iter();
+            start+=2;
+            let dlength = *iter.next().unwrap_or(&0) as usize;
+            let typ = *iter.next().unwrap_or(&0);
+            let mut iter_desc = data[start..start+dlength].iter();
+            start+=dlength;
+            let conf = ConfigurationDescriptor::new(&mut iter_desc);
+            desc.configurations.push(conf);
+        }
+
         println!("{}:{}\n{}", bus, address, desc);
     }
 
