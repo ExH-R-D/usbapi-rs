@@ -1,0 +1,7 @@
+[package]
+name = "usbapi-rs"
+version = "0.0.1"
+authors = ["Mikael Hermansson <mikael.hermansson@mykolab.com>"]
+
+[dependencies]
+nix=""
