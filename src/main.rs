@@ -10,6 +10,10 @@ use std::fmt;
 struct LinuxUsbDevices {
 }
 
+struct Descriptor {
+    descriptor: Vec<u8>
+}
+
 enum DescriptorType {
     Device = 1,
     Configuration = 2,
@@ -22,6 +26,8 @@ enum DescriptorType {
 }
 
 struct DeviceDescriptor {
+    bus: u8,
+    address: u8,
     length: u8,
     descriptor_type: u8,
     bcd_usb: u16,
@@ -75,6 +81,7 @@ struct EndpointDescriptor {
 
 impl fmt::Display for DeviceDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut d = format!("{}:{}\n", self.bus, self.address);
         let mut d = format!("bLength: {}\n", self.length);
         d+=&format!("bDescriptorType: {}\n", self.descriptor_type);
         d+=&format!("bcdUsb: 0x{:04x}\n", self.bcd_usb);
@@ -144,9 +151,31 @@ impl fmt::Display for EndpointDescriptor {
     }
 }
 
+impl Descriptor {
+    fn new(data: Vec<u8>) -> Self {
+        Descriptor { descriptor: data }
+    }
+}
+
+impl Iterator for Descriptor {
+    type Item = Vec<u8>;
+    fn next(&mut self) -> Option<Vec<u8>> {
+        if self.descriptor.len() < 1 {
+            return None
+        }
+
+        let dlength = self.descriptor[0] as usize;
+        let give = self.descriptor[..dlength].to_vec();
+        self.descriptor = self.descriptor[dlength..].to_vec();
+        Some(give)
+    }
+}
+
 impl DeviceDescriptor {
-    fn new(iter: &mut Iter<u8>) -> Option<Self> {
+    fn new(bus: u8, address: u8, iter: &mut Iter<u8>) -> Option<Self> {
         Some(DeviceDescriptor {
+            bus: bus,
+            address: address,
             length: *iter.next()?,
             descriptor_type: *iter.next()?,
             bcd_usb: *iter.next()? as u16 | (*iter.next().unwrap_or(&0) as u16) << 8,
@@ -217,6 +246,7 @@ impl LinuxUsbDevices {
         LinuxUsbDevices{}
     }
     fn enumerate(&mut self, dir: &Path) -> io::Result<()> {
+        // FIXME better recurive checks. Should probabdly stop if uknown
         for entry in fs::read_dir(dir).expect("Can't acces usbpath?") {
             let entry = match entry {
                 Ok(e) => e,
@@ -226,15 +256,15 @@ impl LinuxUsbDevices {
             if path.is_dir() {
                 self.enumerate(&path);
             } else {
-                let bus: i16 = path.parent().unwrap().file_name().unwrap().to_string_lossy().parse::<i16>().unwrap_or(0);
-                let address: i16 = path.file_name().unwrap().to_string_lossy().parse::<i16>().unwrap_or(0);
-                self.device(&entry, bus, address);
+                let bus: u8 = path.parent().unwrap().file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is broken could not parse as u8");
+                let address: u8 = path.file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is smoking could not parse dirname");
+                self.add_device(&entry, bus, address);
             }
         }
         Ok(())
     }
 
-    pub fn device(&mut self, file: &DirEntry, bus: i16, address: i16) {
+    fn add_device(&mut self, file: &DirEntry, bus: u8, address: u8) {
         let file = File::open(file.path());
         let mut file = match file {
             Ok(file) => file,
@@ -244,72 +274,126 @@ impl LinuxUsbDevices {
             }
         };
 
-        // FIME This madness can seriosly be done better
-        // Need to read some more vec/iterator tutorials.
-        let mut data = vec![];
-        file.read_to_end(&mut data).expect("Failed to read");
-        let mut iter = data.iter();
-        let dlength = *iter.next().unwrap_or(&0) as usize;
-        let typ = *iter.next().unwrap_or(&0);
+        let mut desc = Descriptor::new(Vec::new());
+        file.read_to_end(&mut desc.descriptor).expect("Could not read Descriptor");
+        let device = desc.next().unwrap();
+        let mut device = DeviceDescriptor::new(bus, address, &mut device.iter()).expect("Could not add DeviceDescriptor");
+        for current in desc {
+            // still unhappy with my implemention could probably be done better...
+            let typ = current[1];
+            let t = match typ {
+                2 => {
+                    self.add_configuration(&mut device, &mut current.iter())
+                }
+                3 => {
+                    self.add_interface(&mut device, &mut current.iter())
+                }
+                 _ => {
+                    println!("FIXME typ {} {:02X?}", typ, current);
+                    continue;
+                }
+            };
+            println!("{}:{} {}", bus, address, device);
+        }
+        /*
+        let mut dlength = *iter.next().unwrap_or(&0) as usize;
         let mut iter_desc = data[..dlength].iter();
-        let mut desc = DeviceDescriptor::new(&mut iter_desc).expect("Could not parse desc");
-        let mut confs = desc.num_configurations;
+        let mut device = DeviceDescriptor::new(&mut iter_desc).expect("Could not add DeviceDescriptor");
+        // Loosing pointer to original Vec here but ok since no use anymore
         let mut data = &data[dlength..];
-        while confs > 0 {
-            confs-= 1;
+        while data.len() > 0 {
+            println!("{:2X?} dlength: {}", data, dlength);
             let mut iter = data[..2].iter();
-            let dlength = *iter.next().unwrap_or(&0) as usize;
+            println!("head {:02X?}", iter);
+            dlength = *iter.next().unwrap_or(&0) as usize;
             let typ = *iter.next().unwrap_or(&0);
             let mut iter_desc = data[..dlength].iter();
-            let mut conf = ConfigurationDescriptor::new(&mut iter_desc).expect("Could not parse config desciprtiion");
-            data = &data[dlength..];
-            let mut numifaces = conf.num_interfaces;
-            while numifaces > 0 {
-                let mut iter = data[..2].iter();
-                let mut dlength = *iter.next().unwrap_or(&0) as usize;
-                let typ = *iter.next().unwrap_or(&0);
-                let mut iter_desc = data[..dlength].iter();
-                // FIXME enum and redo this madness
-                match typ {
-                    4 => match InterfaceDescriptor::new(&mut iter_desc) {
-                        Some(mut iface) => {
-                            numifaces-=1;
-                            let mut epoints = iface.num_endpoints;
-                            while epoints > 0 {
-                                data = &data[dlength..];
-                                let mut iter = data[..2].iter();
-                                dlength = *iter.next().unwrap_or(&0) as usize;
-                                let typ = *iter.next().unwrap_or(&0);
-                                let mut iter_desc = data[..dlength].iter();
-                                match EndpointDescriptor::new(&mut iter_desc) {
-                                    Some(endpoint) => {
-                                        iface.endpoints.push(endpoint);
-                                        epoints-=1;
-                                    },
-                                    None => {
-                                        eprintln!("{}:{} Could not parser EndpointDescriptor for {:02X?}", bus, address, &data[..dlength]);
-                                    }
-                                }
-                            }
-                            conf.interfaces.push(iface);
-                        },
-                        None => {
-                            eprintln!("{}:{} Could not parser InterfaceDescriptor for {:?}", bus, address, &data[..dlength]);
-                        }
-                    },
-                    typ => eprintln!("Uknown descriptor {:02X}", typ),
+            match typ as u8{
+                2 => self.add_configuration(&mut device, &mut iter_desc),
+                typ => {
+                    println!("FIXME typ {} {:02X?}", typ, iter_desc);
+                    println!("FIXME typ {} {:02X?}", typ, data);
                 }
-                data = &data[dlength..];
-            }
-            desc.configurations.push(conf);
+            };
+            data = &data[dlength..];
         }
-        println!("{}:{}\n{}", bus, address, desc);
+        */
 
-        if data.len() > 0 {
-            println!("rest: {:02X?}", data);
-        }
     }
 
+    fn add_configuration(&self, device: &mut DeviceDescriptor, iter_desc: &mut Iter<u8>) {
+        match ConfigurationDescriptor::new(iter_desc) {
+            Some(conf) => device.configurations.push(conf),
+            None => eprintln!("Could not parse Configuration descriptor {:02X?}", iter_desc)
+        };
+    }
+
+    fn add_interface(&self, device: &mut DeviceDescriptor, iter_desc: &mut Iter<u8>) {
+        let i = device.configurations.len() as usize;
+        match InterfaceDescriptor::new(iter_desc) {
+            Some(iface) => device.configurations[i - 1].interfaces.push(iface),
+            None => eprintln!("Could not parse Configuration descriptor {:02X?}", iter_desc)
+        };
+    }
+
+    fn add_endpoints(&self, device: &mut DeviceDescriptor, iter_desc: &mut Iter<u8>) {
+        let conf_id = device.configurations.len() as usize;
+        let iface_id = device.configurations[conf_id].interfaces.len() as usize;
+
+        match EndpointDescriptor::new(iter_desc) {
+            Some(endpoint) => {
+                let conf = &device.configurations[conf_id];
+                //conf.interfaces[iface_id].push(endpoint);
+            },
+            None => eprintln!("Could not parse Configuration descriptor {:02X?}", iter_desc)
+        };
+    }
+
+/*
+    pub fn add_interface(&self, mut configuration: ConfigurationDescriptor, mut data: Vec<u8>) {
+        let mut iter = data[..2].iter();
+        let mut dlength = *iter.next().unwrap_or(&0) as usize;
+        let typ = *iter.next().unwrap_or(&0);
+        let mut iter_desc = data[..dlength].iter();
+        // FIXME enum and redo this madness
+        match typ {
+            4 => match InterfaceDescriptor::new(&mut iter_desc) {
+                Some(mut iface) => {
+                    numifaces-=1;
+                    let mut epoints = iface.num_endpoints;
+                    while epoints > 0 {
+                        data = &data[dlength..];
+                        let mut iter = data[..2].iter();
+                        dlength = *iter.next().unwrap_or(&0) as usize;
+                        let typ = *iter.next().unwrap_or(&0);
+                        let mut iter_desc = data[..dlength].iter();
+                        match EndpointDescriptor::new(&mut iter_desc) {
+                            Some(endpoint) => {
+                                iface.endpoints.push(endpoint);
+                                epoints-=1;
+                            },
+                            None => {
+                                eprintln!("{}:{} Could not parser EndpointDescriptor for {:02X?}", bus, address, &data[..dlength]);
+                            }
+                        }
+                    }
+                    conf.interfaces.push(iface);
+                },
+                None => {
+                    eprintln!("{}:{} Could not parser InterfaceDescriptor for {:?}", bus, address, &data[..dlength]);
+                }
+            },
+            typ => eprintln!("Uknown descriptor {:02X}", typ),
+        }
+        data = &data[dlength..];
+    }
+    desc.configurations.push(conf);
+    println!("{}:{}\n{}", bus, address, desc);
+
+    if data.len() > 0 {
+        println!("rest: {:02X?}", data);
+    }
+    */
 }
 
 fn main() {
