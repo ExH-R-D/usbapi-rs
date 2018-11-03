@@ -17,17 +17,51 @@ struct LinuxUsbDevices {
     usb_devices: Vec<LinuxUsbDevice>,
 }
 
+#[derive(Debug)]
 enum DescriptorType {
-    Device = 1,
-    Configuration = 2,
-    UTFString = 3,
-    Interface = 4,
-    Endpoint = 5,
-    Class_Specific = 0x24,
-    Hub = 0x29,
-    SS_Endpoint_Companion = 0x30
+    Device,
+    Configuration,
+    String,
+    Interface,
+    Endpoint,
+    ClassSpecific,
+    Hub,
+    SS_Endpoint_Companion,
+    Unknown,
 }
 
+/*impl From<DescriptorType> for u8 {
+    fn from(original: DescriptorType) -> u8 {
+        match original {
+            DescriptorType::Device => 1,
+            DescriptorType::Configuration => 2,
+            DescriptorType::String => 3,
+            DescriptorType::Interface => 4,
+            DescriptorType::Endpoint => 5,
+            DescriptorType::ClassSpecific => 0x24,
+            DescriptorType::Hub => 0x29,
+            DescriptorType::SS_Endpoint_Companion => 0x30,
+        }
+    }
+}
+*/
+
+
+impl From<u8> for DescriptorType {
+    fn from(original: u8) -> DescriptorType {
+        match original {
+            1 => DescriptorType::Device,
+            2 => DescriptorType::Configuration,
+            3 => DescriptorType::String,
+            4 => DescriptorType::Interface,
+            5 => DescriptorType::Endpoint,
+            0x24 => DescriptorType::ClassSpecific,
+            0x29 => DescriptorType::Hub,
+            0x30 => DescriptorType::SS_Endpoint_Companion,
+            n => DescriptorType::Unknown
+        }
+    }
+}
 // Just a used trait when create below
 // Descriptors...
 struct Descriptor {
@@ -95,7 +129,7 @@ impl fmt::Display for LinuxUsbDevice {
 impl fmt::Display for DeviceDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = format!("bLength: {}\n", self.length);
-        d+=&format!("bDescriptorType: {}\n", self.kind);
+        d+=&format!("bDescriptorType: {:?}\n", self.kind);
         d+=&format!("bcdUsb: 0x{:04x}\n", self.bcd_usb);
         d+=&format!("bDeviceClass: {}\n", self.device_class);
         d+=&format!("bDeviceSubClass: {}\n", self.device_sub_class);
@@ -300,19 +334,19 @@ impl LinuxUsbDevices {
         let mut device = LinuxUsbDevice::new(bus, address, &mut device.iter()).expect("Could not add DeviceDescriptor");
         for current in desc {
             // still unhappy with my implemention could probably be done better...
-            let typ = current[1];
-            let t = match typ {
-                2 => {
+            let kind = current[1];// as DescriptorType;
+            match DescriptorType::from(kind){
+                DescriptorType::Configuration => {
                     self.add_configuration(&mut device, &mut current.iter())
                 },
-                4 => {
+                DescriptorType::Interface => {
                     self.add_interface(&mut device, &mut current.iter())
                 },
-                5 => {
+                DescriptorType::Endpoint => {
                     self.add_endpoint(&mut device, &mut current.iter())
                 }
                 _ => {
-                    println!("{}:{} FIXME typ {} {:02X?}", device.bus, device.address, typ, current);
+                    println!("{}:{} FIXME DescriptorType {} {:02X?}", device.bus, device.address, kind, current);
                     continue;
                 }
             };
