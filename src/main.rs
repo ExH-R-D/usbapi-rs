@@ -7,11 +7,14 @@ use std::path::Path as Path;
 use std::io::prelude::*;
 use std::fmt;
 
-struct LinuxUsbDevices {
+struct LinuxUsbDevice {
+    bus: u8,
+    address: u8,
+    device: DeviceDescriptor
 }
 
-struct Descriptor {
-    descriptor: Vec<u8>
+struct LinuxUsbDevices {
+    usb_devices: Vec<LinuxUsbDevice>,
 }
 
 enum DescriptorType {
@@ -25,11 +28,15 @@ enum DescriptorType {
     SS_Endpoint_Companion = 0x30
 }
 
+// Just a used trait when create below
+// Descriptors...
+struct Descriptor {
+    descriptor: Vec<u8>
+}
+
 struct DeviceDescriptor {
-    bus: u8,
-    address: u8,
     length: u8,
-    descriptor_type: u8,
+    kind: u8,
     bcd_usb: u16,
     device_class: u8,
     device_sub_class: u8,
@@ -47,7 +54,7 @@ struct DeviceDescriptor {
 
 struct ConfigurationDescriptor {
     length: u8,
-    descriptor_type: u8,
+    kind: u8,
     total_length: u16,
     num_interfaces: u8,
     configuration_value: u8,
@@ -59,7 +66,7 @@ struct ConfigurationDescriptor {
 
 struct InterfaceDescriptor {
     length: u8,
-    descriptor_type: u8,
+    kind: u8,
     interface_number: u8,
     alternate_setting: u8,
     num_endpoints: u8,
@@ -72,18 +79,23 @@ struct InterfaceDescriptor {
 
 struct EndpointDescriptor {
     length: u8,
-    descriptor_type: u8,
+    kind: u8,
     endpoint_address: u8,
     bm_attributes: u8,
     max_packet_size: u16,
     interval: u8
 }
 
+impl fmt::Display for LinuxUsbDevice {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}\n{}", self.bus, self.address, self.device)
+    }
+}
+
 impl fmt::Display for DeviceDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut d = format!("{}:{}\n", self.bus, self.address);
         let mut d = format!("bLength: {}\n", self.length);
-        d+=&format!("bDescriptorType: {}\n", self.descriptor_type);
+        d+=&format!("bDescriptorType: {}\n", self.kind);
         d+=&format!("bcdUsb: 0x{:04x}\n", self.bcd_usb);
         d+=&format!("bDeviceClass: {}\n", self.device_class);
         d+=&format!("bDeviceSubClass: {}\n", self.device_sub_class);
@@ -106,7 +118,7 @@ impl fmt::Display for DeviceDescriptor {
 impl fmt::Display for ConfigurationDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = format!("bLength: {}\n", self.length);
-        d+=&format!("bDescriptorType: {}\n", self.descriptor_type);
+        d+=&format!("bDescriptorType: {}\n", self.kind);
         d+=&format!("bTotalLength: {}\n", self.total_length);
         d+=&format!("bNumInterfaces: {}\n", self.num_interfaces);
         d+=&format!("bConfigurationValue: {}\n", self.configuration_value);
@@ -123,7 +135,7 @@ impl fmt::Display for ConfigurationDescriptor {
 impl fmt::Display for InterfaceDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = format!("bLength: {}\n", self.length);
-        d+=&format!("bDescriptorType: {}\n", self.descriptor_type);
+        d+=&format!("bDescriptorType: {}\n", self.kind);
         d+=&format!("bInterfaceNumber: {}\n", self.interface_number);
         d+=&format!("bAlternateSetting: {}\n", self.alternate_setting);
         d+=&format!("bNumEndpoints: {}\n", self.num_endpoints);
@@ -142,7 +154,7 @@ impl fmt::Display for InterfaceDescriptor {
 impl fmt::Display for EndpointDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = format!("bLength: {}\n", self.length);
-        d+=&format!("bDescriptorType: {}\n", self.descriptor_type);
+        d+=&format!("bDescriptorType: {}\n", self.kind);
         d+=&format!("bEndpointAddress: 0x{:02X}\n", self.endpoint_address);
         d+=&format!("bmAttributes: {}\n", self.bm_attributes);
         d+=&format!("wMaxPacketSize: {}\n", self.max_packet_size);
@@ -171,13 +183,21 @@ impl Iterator for Descriptor {
     }
 }
 
-impl DeviceDescriptor {
+impl LinuxUsbDevice {
     fn new(bus: u8, address: u8, iter: &mut Iter<u8>) -> Option<Self> {
-        Some(DeviceDescriptor {
+        Some(LinuxUsbDevice {
             bus: bus,
             address: address,
+            device: DeviceDescriptor::new(iter)?
+        })
+    }
+}
+
+impl DeviceDescriptor {
+    fn new(iter: &mut Iter<u8>) -> Option<Self> {
+        Some(DeviceDescriptor {
             length: *iter.next()?,
-            descriptor_type: *iter.next()?,
+            kind: *iter.next()?,
             bcd_usb: *iter.next()? as u16 | (*iter.next().unwrap_or(&0) as u16) << 8,
             device_class: *iter.next()?,
             device_sub_class: *iter.next()?,
@@ -199,7 +219,7 @@ impl ConfigurationDescriptor {
     fn new(iter: &mut Iter<u8>) -> Option<Self> {
         Some(ConfigurationDescriptor {
             length: *iter.next()?,
-            descriptor_type: *iter.next()?,
+            kind: *iter.next()?,
             total_length: *iter.next()? as u16 | (*iter.next()? as u16) << 8,
             num_interfaces: *iter.next()?,
             configuration_value: *iter.next()?,
@@ -215,7 +235,7 @@ impl InterfaceDescriptor {
     fn new(iter: &mut Iter<u8>) -> Option<Self> {
         Some(InterfaceDescriptor {
             length: *iter.next()?,
-            descriptor_type: *iter.next()?,
+            kind: *iter.next()?,
             interface_number: *iter.next()?,
             alternate_setting: *iter.next()?,
             num_endpoints: *iter.next()?,
@@ -232,7 +252,7 @@ impl EndpointDescriptor {
     fn new(iter: &mut Iter<u8>) -> Option<Self> {
         Some(EndpointDescriptor {
             length: *iter.next()?,
-            descriptor_type: *iter.next()?,
+            kind: *iter.next()?,
             endpoint_address: *iter.next()?,
             bm_attributes: *iter.next()?,
             max_packet_size: *iter.next()? as u16 | (*iter.next()? as u16) << 8,
@@ -243,7 +263,7 @@ impl EndpointDescriptor {
 
 impl LinuxUsbDevices {
     fn new() -> Self {
-        LinuxUsbDevices{}
+        LinuxUsbDevices{ usb_devices: vec![]}
     }
     fn enumerate(&mut self, dir: &Path) -> io::Result<()> {
         // FIXME better recurive checks. Should probabdly stop if uknown
@@ -277,126 +297,71 @@ impl LinuxUsbDevices {
         let mut desc = Descriptor::new(Vec::new());
         file.read_to_end(&mut desc.descriptor).expect("Could not read Descriptor");
         let device = desc.next().unwrap();
-        let mut device = DeviceDescriptor::new(bus, address, &mut device.iter()).expect("Could not add DeviceDescriptor");
+        let mut device = LinuxUsbDevice::new(bus, address, &mut device.iter()).expect("Could not add DeviceDescriptor");
         for current in desc {
             // still unhappy with my implemention could probably be done better...
             let typ = current[1];
             let t = match typ {
                 2 => {
                     self.add_configuration(&mut device, &mut current.iter())
-                }
-                3 => {
+                },
+                4 => {
                     self.add_interface(&mut device, &mut current.iter())
+                },
+                5 => {
+                    self.add_endpoint(&mut device, &mut current.iter())
                 }
-                 _ => {
-                    println!("FIXME typ {} {:02X?}", typ, current);
+                _ => {
+                    println!("{}:{} FIXME typ {} {:02X?}", device.bus, device.address, typ, current);
                     continue;
                 }
             };
-            println!("{}:{} {}", bus, address, device);
         }
-        /*
-        let mut dlength = *iter.next().unwrap_or(&0) as usize;
-        let mut iter_desc = data[..dlength].iter();
-        let mut device = DeviceDescriptor::new(&mut iter_desc).expect("Could not add DeviceDescriptor");
-        // Loosing pointer to original Vec here but ok since no use anymore
-        let mut data = &data[dlength..];
-        while data.len() > 0 {
-            println!("{:2X?} dlength: {}", data, dlength);
-            let mut iter = data[..2].iter();
-            println!("head {:02X?}", iter);
-            dlength = *iter.next().unwrap_or(&0) as usize;
-            let typ = *iter.next().unwrap_or(&0);
-            let mut iter_desc = data[..dlength].iter();
-            match typ as u8{
-                2 => self.add_configuration(&mut device, &mut iter_desc),
-                typ => {
-                    println!("FIXME typ {} {:02X?}", typ, iter_desc);
-                    println!("FIXME typ {} {:02X?}", typ, data);
-                }
-            };
-            data = &data[dlength..];
-        }
-        */
-
+        self.usb_devices.push(device);
     }
 
-    fn add_configuration(&self, device: &mut DeviceDescriptor, iter_desc: &mut Iter<u8>) {
+    fn add_configuration(&self, usb: &mut LinuxUsbDevice, iter_desc: &mut Iter<u8>) {
         match ConfigurationDescriptor::new(iter_desc) {
-            Some(conf) => device.configurations.push(conf),
-            None => eprintln!("Could not parse Configuration descriptor {:02X?}", iter_desc)
+            Some(conf) => usb.device.configurations.push(conf),
+            None => eprintln!("Could not parse Configuration descriptor {:02X?} for {}:{}", iter_desc, usb.bus, usb.address)
         };
     }
 
-    fn add_interface(&self, device: &mut DeviceDescriptor, iter_desc: &mut Iter<u8>) {
-        let i = device.configurations.len() as usize;
+    fn add_interface(&self, usb: &mut LinuxUsbDevice, iter_desc: &mut Iter<u8>) {
+        let mut configuration = usb.device.configurations.last_mut().unwrap();
         match InterfaceDescriptor::new(iter_desc) {
-            Some(iface) => device.configurations[i - 1].interfaces.push(iface),
-            None => eprintln!("Could not parse Configuration descriptor {:02X?}", iter_desc)
+            Some(iface) => configuration.interfaces.push(iface),
+            None => eprintln!("Could not parse Interface descriptor {:02X?} for {}:{}", iter_desc, usb.bus, usb.address)
         };
     }
 
-    fn add_endpoints(&self, device: &mut DeviceDescriptor, iter_desc: &mut Iter<u8>) {
-        let conf_id = device.configurations.len() as usize;
-        let iface_id = device.configurations[conf_id].interfaces.len() as usize;
-
+    fn add_endpoint(&self, usb: &mut LinuxUsbDevice, iter_desc: &mut Iter<u8>) {
+        let configuration = usb.device.configurations.last_mut().unwrap();
+        let endpoints = &mut configuration.interfaces.last_mut().unwrap().endpoints;
         match EndpointDescriptor::new(iter_desc) {
             Some(endpoint) => {
-                let conf = &device.configurations[conf_id];
-                //conf.interfaces[iface_id].push(endpoint);
+              //  let mut endpoints = &mut interfaces.endpoints;
+                endpoints.push(endpoint);
             },
-            None => eprintln!("Could not parse Configuration descriptor {:02X?}", iter_desc)
+            None => eprintln!("Could not parse Endpoint descriptor {:02X?} for {}:{}", iter_desc, usb.bus, usb.address)
         };
     }
 
-/*
-    pub fn add_interface(&self, mut configuration: ConfigurationDescriptor, mut data: Vec<u8>) {
-        let mut iter = data[..2].iter();
-        let mut dlength = *iter.next().unwrap_or(&0) as usize;
-        let typ = *iter.next().unwrap_or(&0);
-        let mut iter_desc = data[..dlength].iter();
-        // FIXME enum and redo this madness
-        match typ {
-            4 => match InterfaceDescriptor::new(&mut iter_desc) {
-                Some(mut iface) => {
-                    numifaces-=1;
-                    let mut epoints = iface.num_endpoints;
-                    while epoints > 0 {
-                        data = &data[dlength..];
-                        let mut iter = data[..2].iter();
-                        dlength = *iter.next().unwrap_or(&0) as usize;
-                        let typ = *iter.next().unwrap_or(&0);
-                        let mut iter_desc = data[..dlength].iter();
-                        match EndpointDescriptor::new(&mut iter_desc) {
-                            Some(endpoint) => {
-                                iface.endpoints.push(endpoint);
-                                epoints-=1;
-                            },
-                            None => {
-                                eprintln!("{}:{} Could not parser EndpointDescriptor for {:02X?}", bus, address, &data[..dlength]);
-                            }
-                        }
-                    }
-                    conf.interfaces.push(iface);
-                },
-                None => {
-                    eprintln!("{}:{} Could not parser InterfaceDescriptor for {:?}", bus, address, &data[..dlength]);
-                }
-            },
-            typ => eprintln!("Uknown descriptor {:02X}", typ),
-        }
-        data = &data[dlength..];
+    fn get_device_from_bus(&self, bus: u8, address: u8) -> Option<&LinuxUsbDevice> {
+        for usb in &self.usb_devices {
+            if usb.bus == bus && usb.address == address {
+                return Some(&usb);
+            }
+        };
+        None
     }
-    desc.configurations.push(conf);
-    println!("{}:{}\n{}", bus, address, desc);
-
-    if data.len() > 0 {
-        println!("rest: {:02X?}", data);
-    }
-    */
 }
 
 fn main() {
     let mut usb = LinuxUsbDevices::new();
     usb.enumerate(Path::new("/dev/bus/usb/"));
+
+    let device = usb.get_device_from_bus(3, 4).expect("Could not get device");
+    println!("{}", device);
+
 }
