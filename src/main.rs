@@ -1,11 +1,16 @@
 extern crate nix;
+use nix::ioctl_readwrite_buf;
+use nix::ioctl_write_buf;
+use nix::*;
 use nix::sys::ioctl;
 use std::slice::Iter;
 use std::io;
 use std::fs::{self,DirEntry, File};
 use std::path::Path as Path;
 use std::io::prelude::*;
+use std::os::unix::io::AsRawFd;
 use std::fmt;
+use std::mem;
 
 struct LinuxUsbDevice {
     bus: u8,
@@ -391,6 +396,40 @@ impl LinuxUsbDevices {
     }
 }
 
+
+#[repr(C)]
+struct UsbFsIsoPacketSize {
+    length: usize,
+    actual_length: usize,
+    status: usize
+}
+
+#[repr(C)]
+struct UsbFsUrb {
+    typ: u8,
+    endpoint: u8,
+    status: isize,
+    flags: isize,
+
+    buffer: *mut libc::c_void,
+	buffer_length: isize,
+	actual_length: isize,
+	start_frame: isize,
+    stream_id: isize,
+    /*
+	union {
+		int number_of_packets;	/* Only used for isoc urbs */
+		unsigned int stream_id;	/* Only used with bulk streams */
+	};
+*/
+    error_count: isize,
+    signr: usize,
+    usercontext: *mut libc::c_void,
+    iso_frame_desc: UsbFsIsoPacketSize
+}
+
+const USBFS_URB_TYPE_CONTROL: u8 = 2;
+
 fn main() {
     let mut usb = LinuxUsbDevices::new();
     usb.enumerate(Path::new("/dev/bus/usb/"));
@@ -398,4 +437,11 @@ fn main() {
     let device = usb.get_device_from_bus(3, 4).expect("Could not get device");
     println!("{}", device);
 
+    let file = File::open("/dev/bus/usb/003/004").expect("failed to open usb");
+    ioctl_write_buf!(usb_control, 'U', 10, UsbFsUrb);
+    let mut urb: UsbFsUrb = unsafe { mem::zeroed() };
+    urb.typ = USBFS_URB_TYPE_CONTROL;
+    urb.endpoint = 0x01;
+    let res = unsafe { usb_control(file.as_raw_fd(), &[urb]); };
+    println!("res {:?}", res);
 }
