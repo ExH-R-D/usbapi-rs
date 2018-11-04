@@ -3,14 +3,17 @@ use nix::ioctl_readwrite_buf;
 use nix::ioctl_write_buf;
 use nix::*;
 use nix::sys::ioctl;
+use std::ffi::CString;
 use std::slice::Iter;
 use std::io;
 use std::fs::{self,DirEntry, File};
 use std::path::Path as Path;
 use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
+use std::fs::OpenOptions;
 use std::fmt;
 use std::mem;
+use std::fmt::Debug;
 
 struct LinuxUsbDevice {
     bus: u8,
@@ -398,50 +401,104 @@ impl LinuxUsbDevices {
 
 
 #[repr(C)]
-struct UsbFsIsoPacketSize {
-    length: usize,
-    actual_length: usize,
-    status: usize
+struct UsbFsControlTransfer {
+    request_type: u8,
+    request: u8,
+    value: u16,
+    index: u16,
+    timeout: u32,
+    data: *mut libc::c_void
 }
 
+ #[repr(C)]
+struct UsbFsIsoPacketSize {
+    length: u32,
+    actual_length: u32,
+    status: u32
+}
+
+#[repr(C)]
+struct UsbFsGetDriver {
+    interface: i32,
+    driver: [libc::c_char; 256]
+}
+
+#[repr(C)]
+struct UsbFsIoctl {
+    interface: i32,
+    code: i32,
+    data: *mut libc::c_void
+}
+
+enum urb_union {
+        number_of_packets(i32),
+        stream_id(u32)
+}
 #[repr(C)]
 struct UsbFsUrb {
     typ: u8,
     endpoint: u8,
-    status: isize,
-    flags: isize,
-
+    status: u32,
+    flags: u32,
     buffer: *mut libc::c_void,
-	buffer_length: isize,
-	actual_length: isize,
-	start_frame: isize,
-    stream_id: isize,
-    /*
-	union {
-		int number_of_packets;	/* Only used for isoc urbs */
-		unsigned int stream_id;	/* Only used with bulk streams */
-	};
-*/
-    error_count: isize,
-    signr: usize,
+	buffer_length: i32,
+	actual_length: i32,
+	start_frame: i32,
+    union: urb_union,
+    error_count: i32,
+    signr: u32,
     usercontext: *mut libc::c_void,
     iso_frame_desc: UsbFsIsoPacketSize
 }
 
+
+ioctl_read!(usb_claim_interface, b'U', 15, u32);
+ioctl_read!(usb_release_interface, b'U', 16, u32);
+//ioctl_none!(usb_disconnect, b'U', 22);
+ioctl_read!(usb_get_capabilities, b'U', 26, u32);
+
+const USBFS_URB_TYPE_ISO: u8 = 0;
+const USBFS_URB_TYPE_INTERRUPT: u8 = 1;
 const USBFS_URB_TYPE_CONTROL: u8 = 2;
+const USBFS_URB_TYPE_BULK: u8 = 2;
 
 fn main() {
+ioctl_write_ptr!(usb_submiturb, b'U', 0, UsbFsUrb);
+ioctl_write_ptr!(usb_get_driver, b'U', 8, UsbFsGetDriver);
+ioctl_write_ptr!(usb_control_transfer, b'U', 10, UsbFsControlTransfer);
+ioctl_readwrite_buf!(usb_ioctl, b'U', 18, UsbFsIoctl);
+
     let mut usb = LinuxUsbDevices::new();
     usb.enumerate(Path::new("/dev/bus/usb/"));
 
-    let device = usb.get_device_from_bus(3, 4).expect("Could not get device");
+    let device = usb.get_device_from_bus(3, 5).expect("Could not get device");
     println!("{}", device);
 
-    let file = File::open("/dev/bus/usb/003/004").expect("failed to open usb");
-    ioctl_write_buf!(usb_control, 'U', 10, UsbFsUrb);
-    let mut urb: UsbFsUrb = unsafe { mem::zeroed() };
+    let mut file = OpenOptions::new().read(true).write(true).open(format!("/dev/bus/usb/{:03}/{:03}", device.bus, device.address)).expect("failed to open usb");
+    let mut cap = 0;
+    let res = unsafe { usb_get_capabilities(file.as_raw_fd(), &mut cap) };
+    println!("res {:?} Capabilitys: 0x{:02X}", res, cap);
+
+    let mut driver: UsbFsGetDriver = unsafe { mem::zeroed() };
+    let res = unsafe { usb_get_driver(file.as_raw_fd(), &driver) };
+    let driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
+    println!("res {:?} get_driver: {:?}", res, driver_name);
+
+    let mut claim: [UsbFsIoctl;1] = unsafe { mem::zeroed() };
+    claim[0].interface = 0;
+    claim[0].code = request_code_none!(b'U', 22) as i32;
+    let res = unsafe { usb_ioctl(file.as_raw_fd(), &mut claim[..]) };
+    println!("res {:?} {:08X}", res, claim[0].code);
+     
+
+    let mut iface = 1;
+    let res = unsafe { usb_claim_interface(file.as_raw_fd(), &mut iface) };
+    println!("res {:?} {}", res, iface);
+     /*
     urb.typ = USBFS_URB_TYPE_CONTROL;
     urb.endpoint = 0x01;
     let res = unsafe { usb_control(file.as_raw_fd(), &[urb]); };
-    println!("res {:?}", res);
+    */
+    loop {
+    }
 }
