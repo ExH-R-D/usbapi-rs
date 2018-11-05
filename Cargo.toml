@@ -5,3 +5,4 @@ authors = ["Mikael Hermansson <mikael.hermansson@mykolab.com>"]
 
 [dependencies]
 nix=""
+signal-hook = "0.1.5"
