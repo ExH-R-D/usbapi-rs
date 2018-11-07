@@ -1,5 +1,3 @@
-use std::slice::Iter;
-
 pub struct Descriptor {
     pub descriptor: Vec<u8>
 }
@@ -13,7 +11,7 @@ pub enum DescriptorType {
     Endpoint,
     ClassSpecific,
     Hub,
-    SS_Endpoint_Companion,
+    SsEndpointCompanion,
     Unknown,
 }
 
@@ -27,7 +25,7 @@ impl From<u8> for DescriptorType {
             5 => DescriptorType::Endpoint,
             0x24 => DescriptorType::ClassSpecific,
             0x29 => DescriptorType::Hub,
-            0x30 => DescriptorType::SS_Endpoint_Companion,
+            0x30 => DescriptorType::SsEndpointCompanion,
             n => DescriptorType::Unknown
         }
     }
