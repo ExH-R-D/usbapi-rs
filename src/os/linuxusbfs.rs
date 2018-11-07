@@ -86,9 +86,9 @@ pub struct UsbFsUrb {
 }
 
 pub struct UsbDevice {
-    bus: u8,
-    address: u8,
-    device: Device
+    pub bus: u8,
+    pub address: u8,
+    pub device: Device
 }
 
 impl fmt::Display for UsbDevice {
@@ -108,13 +108,14 @@ impl UsbDevice {
 }
 
 pub struct UsbEnumerate {
-    usb_devices: Vec<UsbDevice>,
+    pub devices: Vec<UsbDevice>,
 }
 
 impl UsbEnumerate {
     pub fn new() -> Self {
-        UsbEnumerate { usb_devices: vec![]}
+        UsbEnumerate { devices: vec![]}
     }
+
     pub fn enumerate(&mut self, dir: &Path) -> io::Result<()> {
         // FIXME better recurive checks. Should probabdly stop if uknown
         for entry in fs::read_dir(dir).expect("Can't acces usbpath?") {
@@ -167,7 +168,7 @@ impl UsbEnumerate {
                 }
             };
         }
-        self.usb_devices.push(device);
+        self.devices.push(device);
     }
 
     fn add_configuration(&self, usb: &mut UsbDevice, iter_desc: &mut Iter<u8>) {
@@ -190,15 +191,18 @@ impl UsbEnumerate {
         let endpoints = &mut configuration.interfaces.last_mut().unwrap().endpoints;
         match Endpoint::new(iter_desc) {
             Some(endpoint) => {
-              //  let mut endpoints = &mut interfaces.endpoints;
                 endpoints.push(endpoint);
             },
             None => eprintln!("Could not parse Endpoint descriptor {:02X?} for {}:{}", iter_desc, usb.bus, usb.address)
         };
     }
 
+    pub fn devices(&self) -> &Vec<UsbDevice> {
+        return &self.devices;
+    }
+
     pub fn get_device_from_bus(&self, bus: u8, address: u8) -> Option<&UsbDevice> {
-        for usb in &self.usb_devices {
+        for usb in &self.devices {
             if usb.bus == bus && usb.address == address {
                 return Some(&usb);
             }

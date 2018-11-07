@@ -1,7 +1,8 @@
 [package]
-name = "usbapi-rs"
+name = "usbapi"
 version = "0.0.1"
 authors = ["Mikael Hermansson <mikael.hermansson@mykolab.com>"]
+keywords = ["usb", "usbfs", "hardware"]
 
 [dependencies]
 nix=""
