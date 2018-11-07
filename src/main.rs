@@ -259,7 +259,7 @@ impl UsbFsDriver {
     fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32> {
         ioctl_readwrite_ptr!(usb_bulk_transfer, b'U', 2, BulkTransfer);
         let bulk = BulkTransfer {
-            ep: (0x80 | ep) as u32,
+            ep: ep as u32,
             length: length,
             timeout: 10,
             data: mem
@@ -271,12 +271,12 @@ impl UsbFsDriver {
                 if len >= 0 {
                     return Ok(len as u32);
                 } else {
-                    println!("bulk read error cause {:?} FIXME return Err", res);
+                    println!("Bulk endpoint: {:02X}, error cause {:?} FIXME return Err", ep, res);
                     return Ok(0);
                 }
             },
             Err(res) => {
-                println!("bulk read error cause {:?}", res);
+                println!("Bulk endpoint: {:02X} error cause {:?}", ep, res);
             }
         }
 
@@ -379,7 +379,7 @@ fn main() {
     let mut usb = LinuxUsbEnumerate::new();
     usb.enumerate(Path::new("/dev/bus/usb/"));
 
-    let device = usb.get_device_from_bus(3, 4).expect("Could not get device");
+    let device = usb.get_device_from_bus(3, 5).expect("Could not get device");
     println!("{}", device);
 
     let mut usb = UsbFsDriver::from_device(&device).expect("FIXME actually cant fail");
