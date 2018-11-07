@@ -4,6 +4,7 @@ mod descriptors;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::slice;
 use nix::*;
 use nix::sys::ioctl;
 use std::ffi::CString;
@@ -31,7 +32,7 @@ struct LinuxUsbDevice {
     device: Device
 }
 
-struct LinuxUsbDevices {
+struct LinuxUsbEnumerate {
     usb_devices: Vec<LinuxUsbDevice>,
 }
 
@@ -51,9 +52,9 @@ impl LinuxUsbDevice {
     }
 }
 
-impl LinuxUsbDevices {
+impl LinuxUsbEnumerate {
     fn new() -> Self {
-        LinuxUsbDevices{ usb_devices: vec![]}
+        LinuxUsbEnumerate { usb_devices: vec![]}
     }
     fn enumerate(&mut self, dir: &Path) -> io::Result<()> {
         // FIXME better recurive checks. Should probabdly stop if uknown
@@ -153,6 +154,27 @@ struct UsbFsDriver {
     claims: Vec<u32>
 }
 
+#[repr(C)]
+struct ControlTransfer {
+    request_type: u8,
+    request: u8,
+    value: u16,
+    index: u16,
+    length: u16,
+    timeout: u32,
+    data: *mut libc::c_void
+}
+
+// Sync bulk transfer
+#[derive(Debug)]
+#[repr(C)]
+struct BulkTransfer {
+    ep: u32,
+    length: u32,
+    timeout: u32,
+    data: *mut libc::c_void
+}
+
 impl UsbFsDriver {
     fn from_device(device: &LinuxUsbDevice) -> Result<UsbFsDriver> {
         Ok(UsbFsDriver {
@@ -206,6 +228,64 @@ impl UsbFsDriver {
         println!("release {:?}", res);
         Ok(())
     }
+
+    fn control(&self) -> Result<()> {
+        ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
+        let control = ControlTransfer {
+            request_type: 0x21,
+            request: 0x22,
+            value: 0x3,
+            index: 0,
+            length: 0,
+            timeout: 100,
+            data: Vec::new().as_mut_ptr()
+        };
+
+        let res = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &control) };
+        println!("control {:?}", res);
+ 
+        Ok(())
+    }
+
+    fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32> {
+        self.bulk(0x80 | ep, mem.as_mut_ptr() as *mut libc::c_void, mem.len() as u32)
+    }
+
+    fn bulk_write(&self, ep: u8, mem: &[u8]) -> Result<u32> {
+        // TODO error if ep highest is set eg BULK_READ?
+        self.bulk(ep & 0x7F, mem.as_ptr() as *mut libc::c_void, mem.len() as u32)
+    }
+
+    fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32> {
+        ioctl_readwrite_ptr!(usb_bulk_transfer, b'U', 2, BulkTransfer);
+        let bulk = BulkTransfer {
+            ep: (0x80 | ep) as u32,
+            length: length,
+            timeout: 10,
+            data: mem
+        };
+
+        let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &bulk) };
+        match res {
+            Ok(len) => {
+                if len >= 0 {
+                    return Ok(len as u32);
+                } else {
+                    println!("bulk read error cause {:?} FIXME return Err", res);
+                    return Ok(0);
+                }
+            },
+            Err(res) => {
+                println!("bulk read error cause {:?}", res);
+            }
+        }
+
+        Ok(0)
+    }
+
+    fn bulk_read_async(&self, ep: u32, length: u32) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl Drop for UsbFsDriver {
@@ -214,16 +294,6 @@ impl Drop for UsbFsDriver {
             self.release_interface(*claim);
         }
     }
-}
-
-#[repr(C)]
-struct UsbFsControlTransfer {
-    request_type: u8,
-    request: u8,
-    value: u16,
-    index: u16,
-    timeout: u32,
-    data: *mut libc::c_void
 }
 
  #[repr(C)]
@@ -305,10 +375,8 @@ fn main() {
     signal_hook::flag::register(signal_hook::SIGQUIT, Arc::clone(&term)).unwrap();
     signal_hook::flag::register(signal_hook::SIGTERM, Arc::clone(&term)).unwrap();
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&term)).unwrap();
-    ioctl_write_ptr!(usb_submiturb, b'U', 0, UsbFsUrb);
-    ioctl_write_ptr!(usb_control_transfer, b'U', 10, UsbFsControlTransfer);
 
-    let mut usb = LinuxUsbDevices::new();
+    let mut usb = LinuxUsbEnumerate::new();
     usb.enumerate(Path::new("/dev/bus/usb/"));
 
     let device = usb.get_device_from_bus(3, 4).expect("Could not get device");
@@ -317,7 +385,16 @@ fn main() {
     let mut usb = UsbFsDriver::from_device(&device).expect("FIXME actually cant fail");
     println!("Capabilities: 0x{:02X?}", usb.capabilities().unwrap());
     usb.claim_interface(0);
-    usb.claim_interface(0);
+    usb.control();
+    let mut mem: [u8; 64] = [0; 64];
+    let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
+    println!("{} data {:?}", len, &mem[0..len as usize]);
+    let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
+    println!("{} data: {:?}", len, &mem[0..len as usize]);
+    let len = usb.bulk_write(1, "$".to_string().as_bytes()).unwrap_or(0);
+    println!("{} sent data", len);
+    let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
+    println!("{} data: {:?}", len, &mem[0..len as usize]);
     loop {
         if term.load(Ordering::Relaxed) {
             break;
