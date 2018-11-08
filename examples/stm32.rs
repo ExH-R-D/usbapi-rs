@@ -1,6 +1,6 @@
 extern crate usbapi;
-use usbapi::os::linux::usbfs::UsbFsDriver;
-use usbapi::os::linux::enumerate::UsbEnumerate;
+use usbapi::os::linux::usbfs::UsbFs;
+use usbapi::os::linux::enumerate::Enumerate;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -14,12 +14,12 @@ fn main() {
     signal_hook::flag::register(signal_hook::SIGTERM, Arc::clone(&term)).unwrap();
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&term)).unwrap();
 
-    let mut usb = UsbEnumerate::new();
+    let mut usb = Enumerate::new();
     usb.enumerate(Path::new("/dev/bus/usb/")).expect("Could not find /dev/bus/usb are you running windows or maybe freebsd or mac or... whatever feel free to add a patch :)");
 
     for device in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
-            let mut usb = UsbFsDriver::from_device(&device).expect("FIXME actually cant fail");
+            let mut usb = UsbFs::from_device(&device).expect("FIXME actually cant fail");
             println!("Capabilities: 0x{:02X?}", usb.capabilities().unwrap());
             usb.claim_interface(0).is_ok();
             match usb.control() {

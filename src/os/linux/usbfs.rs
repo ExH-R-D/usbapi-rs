@@ -99,7 +99,7 @@ pub struct BulkTransfer {
     data: *mut libc::c_void
 }
 
-pub struct UsbFsDriver {
+pub struct UsbFs {
     handle: std::fs::File,
     claims: Vec<u32>
 }
@@ -111,9 +111,9 @@ ioctl_read_ptr!(usb_claim_interface, b'U', 15, u32);
 ioctl_read_ptr!(usb_release_interface, b'U', 16, u32);
 ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
-impl UsbFsDriver {
-    pub fn from_device(device: &UsbDevice) -> Result<UsbFsDriver> {
-        Ok(UsbFsDriver {
+impl UsbFs {
+    pub fn from_device(device: &UsbDevice) -> Result<UsbFs> {
+        Ok(UsbFs {
             handle: OpenOptions::new().read(true).write(true).open(format!("/dev/bus/usb/{:03}/{:03}", device.bus, device.address)).expect("FIXME should return error"),
             claims: vec![]
         })
@@ -217,7 +217,7 @@ impl UsbFsDriver {
     }
 }
 
-impl Drop for UsbFsDriver {
+impl Drop for UsbFs {
     fn drop(&mut self) {
         for claim in &self.claims {
             if self.release_interface(*claim).is_ok() {};
