@@ -1,6 +1,6 @@
 extern crate usbapi;
-use usbapi::os::linuxusbfs::UsbFsDriver;
-use usbapi::os::linuxusbfs::UsbEnumerate;
+use usbapi::os::linux::usbfs::UsbFsDriver;
+use usbapi::os::linux::enumerate::UsbEnumerate;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

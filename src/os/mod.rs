@@ -1,1 +1,1 @@
-pub mod linuxusbfs;
+pub mod linux;
