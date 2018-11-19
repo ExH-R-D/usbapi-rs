@@ -38,6 +38,11 @@ fn main() {
             println!("{} data: {:?}", len, &mem[0..len as usize]);
             println!("As string: {}", String::from_utf8_lossy(&mem[0..len as usize]));
 
+            let mut s: [u8; 1] = ['$' as u8; 1];
+            let len = usb.async_transfer(81, &mut s).unwrap_or(0);
+            println!("{} sent data", len);
+            let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
+ 
             loop {
                 // TODO setup a thread to talk to STM via http
                 if term.load(Ordering::Relaxed) {

@@ -35,7 +35,13 @@ const USBFS_URB_TYPE_INTERRUPT: u8 = 1;
 const USBFS_URB_TYPE_CONTROL: u8 = 2;
 const USBFS_URB_TYPE_BULK: u8 = 2;
 
- #[repr(C)]
+const USBFS_URB_FLAGS_SHORT_NOT_OK: u32 = 0x01;
+const USBFS_URB_FLAGS_ISO_ASAP: u32 = 0x02;
+const USBFS_URB_FLAGS_BULK_CONTINUATION: u32 = 0x04;
+const USBFS_URB_FLAGS_QUEUE_BULK: u32 = 0x10;
+const USBFS_URB_FLAGS_ZERO_PACKET: u32 = 0x40;
+
+#[repr(C)]
 pub struct UsbFsIsoPacketSize {
     length: u32,
     actual_length: u32,
@@ -62,6 +68,7 @@ union UrbUnion {
 }
 
 #[repr(C)]
+#[repr(packed)]
 pub struct UsbFsUrb {
     typ: u8,
     endpoint: u8,
@@ -71,11 +78,15 @@ pub struct UsbFsUrb {
     buffer_length: i32,
     actual_length: i32,
     start_frame: i32,
-    union: UrbUnion,
+//    union: UrbUnion,
+    number_of_packets: i32,
     error_count: i32,
     signr: u32,
     usercontext: *mut libc::c_void,
-    iso_frame_desc: UsbFsIsoPacketSize
+    //iso_frame_desc: UsbFsIsoPacketSize
+    iso_frame_desc_length: u32,
+    iso_frame_desc_actual_length: u32,
+    iso_frame_desc_status: u32
 }
 
 #[repr(C)]
@@ -107,6 +118,7 @@ pub struct UsbFs {
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
 ioctl_readwrite_ptr!(usb_bulk_transfer, b'U', 2, BulkTransfer);
 ioctl_write_ptr!(usb_get_driver, b'U', 8, UsbFsGetDriver);
+ioctl_read_ptr!(usb_submit_urb, b'U', 10, UsbFsUrb);
 ioctl_read_ptr!(usb_claim_interface, b'U', 15, u32);
 ioctl_read_ptr!(usb_release_interface, b'U', 16, u32);
 ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
@@ -212,9 +224,42 @@ impl UsbFs {
         Ok(0)
     }
 
-    pub fn bulk_read_async(&self, ep: u32, length: u32) -> Result<()> {
-        Ok(())
-    }
+    pub fn async_transfer(&self, ep: u8, mem: &mut [u8]) -> Result<u8>{
+        let urb = UsbFsUrb {
+            typ: USBFS_URB_TYPE_BULK,
+            endpoint: ep,
+            status: 0,
+            flags: USBFS_URB_FLAGS_BULK_CONTINUATION,
+            buffer: mem.as_mut_ptr() as *mut libc::c_void,
+            buffer_length: mem.len() as i32,
+            actual_length: mem.len() as i32,
+            start_frame: 0,
+            number_of_packets: 1,
+            error_count: 0,
+            signr: 0,
+            usercontext: mem.as_mut_ptr() as *mut libc::c_void,
+            iso_frame_desc_length: 0,
+            iso_frame_desc_actual_length: 0,
+            iso_frame_desc_status: 0
+        };
+
+        let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) };
+        match res {
+            Ok(len) => {
+                if len >= 0 {
+                    return Ok(0);
+                } else {
+                    println!("URB: {:02X}, error cause {:?} FIXME return Err", ep, res);
+                    return Ok(0);
+                }
+            },
+            Err(res) => {
+                println!("URB {:02X} error cause {:?}", ep, res);
+            }
+        }
+
+        Ok(0)
+     }
 }
 
 impl Drop for UsbFs {
