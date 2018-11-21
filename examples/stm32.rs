@@ -20,8 +20,9 @@ fn main() {
     for device in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
             let mut usb = UsbFs::from_device(&device).expect("FIXME actually cant fail");
-            println!("Capabilities: 0x{:02X?}", usb.capabilities().unwrap());
+            println!("Capabilities: 0x{:02X?}", usb.capabilities());
             usb.claim_interface(0).is_ok();
+            usb.claim_interface(1).is_ok();
             match usb.control() {
                 Ok(_) => {},
                 Err(err) => println!("Send bytes to control failed {}", err),
@@ -39,7 +40,7 @@ fn main() {
             println!("As string: {}", String::from_utf8_lossy(&mem[0..len as usize]));
 
             let mut s: [u8; 1] = ['$' as u8; 1];
-            let len = usb.async_transfer(81, &mut s).unwrap_or(0);
+            let len = usb.async_transfer(0x1, &mut s).unwrap_or(0);
             println!("{} sent data", len);
             let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
  

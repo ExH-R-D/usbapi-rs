@@ -1,9 +1,9 @@
 use nix::*;
-use std::ffi::CString;
-use std::os::unix::io::AsRawFd;
-use std::mem;
-use std::fs::OpenOptions;
 use os::linux::enumerate::UsbDevice;
+use std::ffi::CString;
+use std::fs::OpenOptions;
+use std::mem;
+use std::os::unix::io::AsRawFd;
 
 #[macro_export]
 macro_rules! ioctl_read_ptr {
@@ -29,64 +29,67 @@ macro_rules! ioctl_readwrite_ptr {
     )
 }
 
+const USBFS_CAP_ZERO_PACKET: u8 = 0x01;
+const USBFS_CAP_BULK_CONTINUATION: u8 = 0x02;
+const USBFS_CAP_NO_PACKET_SIZE_LIM: u8 = 0x04;
+const USBFS_CAP_BULK_SCATTER_GATHER: u8 = 0x08;
+const USBFS_CAP_REAP_AFTER_DISCONNECT: u8 = 0x10;
+const USBFS_CAP_MMAP: u8 = 0x20;
+const USBFS_CAP_DROP_PRIVILEGES: u8 = 0x40;
 
 const USBFS_URB_TYPE_ISO: u8 = 0;
 const USBFS_URB_TYPE_INTERRUPT: u8 = 1;
 const USBFS_URB_TYPE_CONTROL: u8 = 2;
-const USBFS_URB_TYPE_BULK: u8 = 2;
+const USBFS_URB_TYPE_BULK: u8 = 3;
 
 const USBFS_URB_FLAGS_SHORT_NOT_OK: u32 = 0x01;
 const USBFS_URB_FLAGS_ISO_ASAP: u32 = 0x02;
 const USBFS_URB_FLAGS_BULK_CONTINUATION: u32 = 0x04;
-const USBFS_URB_FLAGS_QUEUE_BULK: u32 = 0x10;
 const USBFS_URB_FLAGS_ZERO_PACKET: u32 = 0x40;
+const USBFS_URB_FLAGS_NO_INTERRUPT: u32 = 0x80;
 
 #[repr(C)]
 pub struct UsbFsIsoPacketSize {
     length: u32,
     actual_length: u32,
-    status: u32
+    status: u32,
 }
 
 #[repr(C)]
 pub struct UsbFsGetDriver {
     interface: i32,
-    driver: [libc::c_char; 256]
+    driver: [libc::c_char; 256],
 }
 
 #[repr(C)]
 pub struct UsbFsIoctl {
     interface: i32,
     code: i32,
-    data: *mut libc::c_void
+    data: *mut libc::c_void,
 }
 
 #[repr(C)]
 union UrbUnion {
     number_of_packets: i32,
-    stream_id: u32
+    stream_id: u32,
 }
 
 #[repr(C)]
-#[repr(packed)]
 pub struct UsbFsUrb {
     typ: u8,
     endpoint: u8,
-    status: u32,
+    status: i32,
     flags: u32,
     buffer: *mut libc::c_void,
     buffer_length: i32,
     actual_length: i32,
     start_frame: i32,
-//    union: UrbUnion,
-    number_of_packets: i32,
+    // FIXMEUNION
+    stream_id: i32,
+    // UNION end...
     error_count: i32,
     signr: u32,
     usercontext: *mut libc::c_void,
-    //iso_frame_desc: UsbFsIsoPacketSize
-    iso_frame_desc_length: u32,
-    iso_frame_desc_actual_length: u32,
-    iso_frame_desc_status: u32
 }
 
 #[repr(C)]
@@ -97,7 +100,7 @@ pub struct ControlTransfer {
     index: u16,
     length: u16,
     timeout: u32,
-    data: *mut libc::c_void
+    data: *mut libc::c_void,
 }
 
 // Sync bulk transfer
@@ -107,12 +110,13 @@ pub struct BulkTransfer {
     ep: u32,
     length: u32,
     timeout: u32,
-    data: *mut libc::c_void
+    data: *mut libc::c_void,
 }
 
 pub struct UsbFs {
     handle: std::fs::File,
-    claims: Vec<u32>
+    claims: Vec<u32>,
+    capabilities: u32,
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -125,22 +129,36 @@ ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
 impl UsbFs {
     pub fn from_device(device: &UsbDevice) -> Result<UsbFs> {
-        Ok(UsbFs {
-            handle: OpenOptions::new().read(true).write(true).open(format!("/dev/bus/usb/{:03}/{:03}", device.bus, device.address)).expect("FIXME should return error"),
-            claims: vec![]
-        })
+        let mut res = UsbFs {
+            handle: OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(format!(
+                    "/dev/bus/usb/{:03}/{:03}",
+                    device.bus, device.address
+                ))
+                .expect("FIXME should return error"),
+            claims: vec![],
+            capabilities: 0,
+        };
+
+        res.capabilities();
+
+        Ok(res)
     }
 
-    pub fn capabilities(&self) -> Result<u32> {
-        let mut cap = 0;
-        let res = unsafe { usb_get_capabilities(self.handle.as_raw_fd(), &mut cap) };
+    pub fn capabilities(&mut self) -> u32 {
+        if self.capabilities != 0 {
+            return self.capabilities;
+        }
+        let res = unsafe { usb_get_capabilities(self.handle.as_raw_fd(), &mut self.capabilities) };
         // FIXME return the error to upper layer error!!!
         // but got an compile error
         if res != Ok(0) {
             eprintln!("Error {:?}", res);
         }
 
-        Ok(cap)
+        self.capabilities
     }
 
     pub fn claim_interface(&mut self, interface: u32) -> Result<()> {
@@ -180,7 +198,7 @@ impl UsbFs {
             index: 0,
             length: 0,
             timeout: 100,
-            data: Vec::new().as_mut_ptr()
+            data: Vec::new().as_mut_ptr(),
         };
 
         let res = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &control) };
@@ -190,12 +208,20 @@ impl UsbFs {
     }
 
     pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32> {
-        self.bulk(0x80 | ep, mem.as_mut_ptr() as *mut libc::c_void, mem.len() as u32)
+        self.bulk(
+            0x80 | ep,
+            mem.as_mut_ptr() as *mut libc::c_void,
+            mem.len() as u32,
+        )
     }
 
     pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> Result<u32> {
         // TODO error if ep highest is set eg BULK_READ?
-        self.bulk(ep & 0x7F, mem.as_ptr() as *mut libc::c_void, mem.len() as u32)
+        self.bulk(
+            ep & 0x7F,
+            mem.as_ptr() as *mut libc::c_void,
+            mem.len() as u32,
+        )
     }
 
     fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32> {
@@ -203,7 +229,7 @@ impl UsbFs {
             ep: ep as u32,
             length: length,
             timeout: 10,
-            data: mem
+            data: mem,
         };
 
         let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &bulk) };
@@ -212,10 +238,13 @@ impl UsbFs {
                 if len >= 0 {
                     return Ok(len as u32);
                 } else {
-                    println!("Bulk endpoint: {:02X}, error cause {:?} FIXME return Err", ep, res);
+                    println!(
+                        "Bulk endpoint: {:02X}, error cause {:?} FIXME return Err",
+                        ep, res
+                    );
                     return Ok(0);
                 }
-            },
+            }
             Err(res) => {
                 println!("Bulk endpoint: {:02X} error cause {:?}", ep, res);
             }
@@ -224,25 +253,23 @@ impl UsbFs {
         Ok(0)
     }
 
-    pub fn async_transfer(&self, ep: u8, mem: &mut [u8]) -> Result<u8>{
+    pub fn async_transfer(&self, ep: u8, mem: &mut [u8]) -> Result<u8> {
         let urb = UsbFsUrb {
             typ: USBFS_URB_TYPE_BULK,
             endpoint: ep,
             status: 0,
-            flags: USBFS_URB_FLAGS_BULK_CONTINUATION,
+            flags: 0,
             buffer: mem.as_mut_ptr() as *mut libc::c_void,
             buffer_length: mem.len() as i32,
             actual_length: mem.len() as i32,
             start_frame: 0,
-            number_of_packets: 1,
+            stream_id: 0,
             error_count: 0,
             signr: 0,
             usercontext: mem.as_mut_ptr() as *mut libc::c_void,
-            iso_frame_desc_length: 0,
-            iso_frame_desc_actual_length: 0,
-            iso_frame_desc_status: 0
         };
 
+        println!("len {} {:02X?}", urb.buffer_length, urb.buffer);
         let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) };
         match res {
             Ok(len) => {
@@ -252,14 +279,14 @@ impl UsbFs {
                     println!("URB: {:02X}, error cause {:?} FIXME return Err", ep, res);
                     return Ok(0);
                 }
-            },
+            }
             Err(res) => {
                 println!("URB {:02X} error cause {:?}", ep, res);
             }
         }
 
         Ok(0)
-     }
+    }
 }
 
 impl Drop for UsbFs {
@@ -269,4 +296,3 @@ impl Drop for UsbFs {
         }
     }
 }
-
