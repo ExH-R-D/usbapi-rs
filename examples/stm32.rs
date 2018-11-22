@@ -45,19 +45,21 @@ fn main() {
                 String::from_utf8_lossy(&mem[0..len as usize])
             );
 
-            let mut s: [u8; 1] = ['$' as u8; 1];
-            let len = usb.async_transfer(0x1, &mut s).unwrap_or(0);
+            let len = usb.async_transfer(0x1, 1).unwrap_or(0);
+            let len = usb.async_transfer(0x81, 64).unwrap_or(0);
             println!("{} sent data", len);
             let mut events = Events::with_capacity(16);
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100)));
                 for e in &events {
+                    usb.async_response(e);
+            //let len = usb.async_transfer(0x81, 64).unwrap_or(0);
                     println!("event: {:?}", e);
-                    let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
-                    println!(
-                        "As string: {}",
-                        String::from_utf8_lossy(&mem[0..len as usize])
-                    );
+//                    let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
+ //                   println!(
+  //                      "As string: {}",
+   //                     String::from_utf8_lossy(&mem[0..len as usize])
+    //                );
                 }
                 // TODO setup a thread to talk to STM via http
                 if term.load(Ordering::Relaxed) {

@@ -13,11 +13,8 @@ Don't kill me for doing it wrong however you are free to fork or send pull reque
 
 TODO
 
-* Add bulk Syncron API
-* Make sure claims drop correcly and don't try claim already bound.
-* Add async API's
-* Add mmap API's
-* Split code in different modules since it already ggetting big
-
+* better async API's
+* Better mmapping only
+* Add error handling....
 ....
 

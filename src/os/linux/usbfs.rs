@@ -4,10 +4,12 @@ use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::mem;
 use std::os::unix::io::AsRawFd;
-use mio::{Ready, Poll, PollOpt, Token};
+use std::ptr;
+use mio::{Event, Ready, Poll, PollOpt, Token};
 use mio::event::Evented;
 use mio::unix::EventedFd;
 use std::io;
+use std::slice;
 impl Evented for UsbFs {
     fn register(
         &self,
@@ -104,6 +106,7 @@ union UrbUnion {
     stream_id: u32,
 }
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct UsbFsUrb {
     typ: u8,
@@ -147,6 +150,8 @@ pub struct UsbFs {
     handle: std::fs::File,
     claims: Vec<u32>,
     capabilities: u32,
+    ptr: *mut libc::c_void,
+    urbs: Vec<UsbFsUrb>
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -170,9 +175,12 @@ impl UsbFs {
                 .expect("FIXME should return error"),
             claims: vec![],
             capabilities: 0,
+            ptr: ptr::null_mut(),
+            urbs: vec!()
         };
 
         res.capabilities();
+        res.mmap(64);
 
         Ok(res)
     }
@@ -189,6 +197,14 @@ impl UsbFs {
         }
 
         self.capabilities
+    }
+
+    pub fn async_response(&mut self, e: Event) {
+        println!("{:?}", e);
+        println!("{:?}", self.urbs);
+        let ptr = self.ptr as *const u8;
+        let slice = unsafe { slice::from_raw_parts(ptr, 64 as usize) };
+        println!("{:?}", slice);
     }
 
     pub fn claim_interface(&mut self, interface: u32) -> Result<()> {
@@ -283,20 +299,47 @@ impl UsbFs {
         Ok(0)
     }
 
-    pub fn async_transfer(&self, ep: u8, mem: &mut [u8]) -> Result<u8> {
+    fn mmap(&mut self, length: u16) {
+        if self.ptr == ptr::null_mut() {
+            let mut ptr = unsafe {
+                let ptr = libc::mmap(
+                    ptr::null_mut(),
+                    length as libc::size_t,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED,
+                    self.handle.as_raw_fd(),
+                    0 as libc::off_t,
+                    );
+
+                if ptr == libc::MAP_FAILED {
+                    Err(io::Error::last_os_error())
+                } else {
+                    let mut ptr = ptr as *mut u8;
+                    Ok(ptr)
+                }
+            }.unwrap();
+
+            let slice = unsafe { slice::from_raw_parts_mut(ptr, length as usize) };
+            slice[0] = '$' as u8;
+            self.ptr = ptr as *mut libc::c_void;
+        }
+        println!("{:X?}", self.ptr);
+    }
+
+    pub fn async_transfer(&mut self, ep: u8, length: u16) -> Result<u8> {
         let urb = UsbFsUrb {
             typ: USBFS_URB_TYPE_BULK,
             endpoint: ep,
             status: 0,
             flags: 0,
-            buffer: mem.as_mut_ptr() as *mut libc::c_void,
-            buffer_length: mem.len() as i32,
-            actual_length: mem.len() as i32,
+            buffer: self.ptr as *mut libc::c_void,
+            buffer_length: length as i32,
+            actual_length: 0 as i32,
             start_frame: 0,
             stream_id: 0,
             error_count: 0,
             signr: 0,
-            usercontext: mem.as_mut_ptr() as *mut libc::c_void,
+            usercontext: self.ptr as *mut libc::c_void,
         };
 
         println!("len {} {:02X?}", urb.buffer_length, urb.buffer);
@@ -304,6 +347,7 @@ impl UsbFs {
         match res {
             Ok(len) => {
                 if len >= 0 {
+                    self.urbs.push(urb);
                     return Ok(0);
                 } else {
                     println!("URB: {:02X}, error cause {:?} FIXME return Err", ep, res);
