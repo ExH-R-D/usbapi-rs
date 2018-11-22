@@ -7,3 +7,5 @@ keywords = ["usb", "usbfs", "hardware"]
 [dependencies]
 nix=""
 signal-hook = "0.1.5"
+crate = "0.0.2"
+mio = "0.6.16"
