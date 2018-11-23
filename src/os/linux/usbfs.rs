@@ -10,6 +10,7 @@ use mio::event::Evented;
 use mio::unix::EventedFd;
 use std::io;
 use std::slice;
+use std::result::Result;
 impl Evented for UsbFs {
     fn register(
         &self,
@@ -163,7 +164,7 @@ ioctl_read_ptr!(usb_release_interface, b'U', 16, u32);
 ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
 impl UsbFs {
-    pub fn from_device(device: &UsbDevice) -> Result<UsbFs> {
+    pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
         let mut res = UsbFs {
             handle: OpenOptions::new()
                 .read(true)
@@ -171,8 +172,7 @@ impl UsbFs {
                 .open(format!(
                     "/dev/bus/usb/{:03}/{:03}",
                     device.bus, device.address
-                ))
-                .expect("FIXME should return error"),
+                ))?,
             claims: vec![],
             capabilities: 0,
             ptr: ptr::null_mut(),
@@ -185,18 +185,16 @@ impl UsbFs {
         Ok(res)
     }
 
-    pub fn capabilities(&mut self) -> u32 {
+    pub fn capabilities(&mut self) -> Result<u32, nix::Error> {
         if self.capabilities != 0 {
-            return self.capabilities;
+            return Ok(self.capabilities);
         }
         let res = unsafe { usb_get_capabilities(self.handle.as_raw_fd(), &mut self.capabilities) };
-        // FIXME return the error to upper layer error!!!
-        // but got an compile error
         if res != Ok(0) {
-            eprintln!("Error {:?}", res);
+            return Err(nix::Error::Sys(nix::errno::Errno::last()));
         }
 
-        self.capabilities
+        Ok(self.capabilities)
     }
 
     pub fn async_response(&mut self, e: Event) {
@@ -207,7 +205,11 @@ impl UsbFs {
         println!("{:?}", slice);
     }
 
-    pub fn claim_interface(&mut self, interface: u32) -> Result<()> {
+    pub fn setup_endpoint(&mut self, ep: u8, size: u16) -> Result<(), nix::Error> {
+        Ok(())
+    }
+
+    pub fn claim_interface(&mut self, interface: u32) -> Result<(), nix::Error> {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         let driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
@@ -218,25 +220,23 @@ impl UsbFs {
             disconnect.interface = interface as i32;
             // Disconnect driver
             disconnect.code = request_code_none!(b'U', 22) as i32;
-            let res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) };
+            let res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
             println!("disconnect {:?}", res);
         }
 
-        let res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) };
-        if res == Ok(0) {
-            self.claims.push(interface);
-        }
+        let res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
+        self.claims.push(interface);
         println!("claim {:?}", res);
         Ok(())
     }
 
-    pub fn release_interface(&self, interface: u32) -> Result<()> {
-        let res = unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) };
+    pub fn release_interface(&self, interface: u32) -> Result<(), nix::Error> {
+        let res = unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) }?;
         println!("release {:?}", res);
         Ok(())
     }
 
-    pub fn control(&self) -> Result<()> {
+    pub fn control(&self) -> Result<(), nix::Error> {
         let control = ControlTransfer {
             request_type: 0x21,
             request: 0x22,
@@ -247,13 +247,13 @@ impl UsbFs {
             data: Vec::new().as_mut_ptr(),
         };
 
-        let res = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &control) };
+        let res = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &control) }?;
         println!("control {:?}", res);
 
         Ok(())
     }
 
-    pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32> {
+    pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32, nix::Error> {
         self.bulk(
             0x80 | ep,
             mem.as_mut_ptr() as *mut libc::c_void,
@@ -261,7 +261,7 @@ impl UsbFs {
         )
     }
 
-    pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> Result<u32> {
+    pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> Result<u32, nix::Error> {
         // TODO error if ep highest is set eg BULK_READ?
         self.bulk(
             ep & 0x7F,
@@ -270,7 +270,7 @@ impl UsbFs {
         )
     }
 
-    fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32> {
+    fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32, nix::Error> {
         let bulk = BulkTransfer {
             ep: ep as u32,
             length: length,
@@ -299,34 +299,31 @@ impl UsbFs {
         Ok(0)
     }
 
-    fn mmap(&mut self, length: u16) {
+    fn mmap(&mut self, length: u16) -> Result<(), Error> {
         if self.ptr == ptr::null_mut() {
             let mut ptr = unsafe {
-                let ptr = libc::mmap(
+                libc::mmap(
                     ptr::null_mut(),
                     length as libc::size_t,
                     libc::PROT_READ | libc::PROT_WRITE,
                     libc::MAP_SHARED,
                     self.handle.as_raw_fd(),
-                    0 as libc::off_t,
-                    );
+                    0 as libc::off_t)
 
-                if ptr == libc::MAP_FAILED {
-                    Err(io::Error::last_os_error())
-                } else {
-                    let mut ptr = ptr as *mut u8;
-                    Ok(ptr)
-                }
-            }.unwrap();
+            } as *mut u8;
 
+            if ptr == ptr::null_mut() {
+                return Err(nix::Error::Sys(nix::errno::Errno::last()));
+            }
             let slice = unsafe { slice::from_raw_parts_mut(ptr, length as usize) };
             slice[0] = '$' as u8;
-            self.ptr = ptr as *mut libc::c_void;
+           self.ptr = ptr as *mut libc::c_void;
         }
         println!("{:X?}", self.ptr);
+        Ok(())
     }
 
-    pub fn async_transfer(&mut self, ep: u8, length: u16) -> Result<u8> {
+    pub fn async_transfer(&mut self, ep: u8, length: u16) -> Result<i32, nix::Error> {
         let urb = UsbFsUrb {
             typ: USBFS_URB_TYPE_BULK,
             endpoint: ep,
@@ -343,23 +340,9 @@ impl UsbFs {
         };
 
         println!("len {} {:02X?}", urb.buffer_length, urb.buffer);
-        let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) };
-        match res {
-            Ok(len) => {
-                if len >= 0 {
-                    self.urbs.push(urb);
-                    return Ok(0);
-                } else {
-                    println!("URB: {:02X}, error cause {:?} FIXME return Err", ep, res);
-                    return Ok(0);
-                }
-            }
-            Err(res) => {
-                println!("URB {:02X} error cause {:?}", ep, res);
-            }
-        }
-
-        Ok(0)
+        let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }?;
+        self.urbs.push(urb);
+        Ok(res)
     }
 }
 
