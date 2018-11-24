@@ -45,21 +45,23 @@ fn main() {
                 String::from_utf8_lossy(&mem[0..len as usize])
             );
 
-            let len = usb.async_transfer(0x1, 1).unwrap_or(0);
-            let len = usb.async_transfer(0x81, 64).unwrap_or(0);
+            let urb = usb.new_bulk(0x1, 1).unwrap();
+            let slice = unsafe { std::slice::from_raw_parts_mut(urb.buffer, 1) };
+            slice[0] = '$' as u8;
+            let len = usb.async_transfer(urb).unwrap_or(0);
             println!("{} sent data", len);
             let mut events = Events::with_capacity(16);
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100)));
                 for e in &events {
-                    usb.async_response(e);
+            //        usb.async_response(e);
             //let len = usb.async_transfer(0x81, 64).unwrap_or(0);
                     println!("event: {:?}", e);
-//                    let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
- //                   println!(
-  //                      "As string: {}",
-   //                     String::from_utf8_lossy(&mem[0..len as usize])
-    //                );
+                      let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
+                    println!(
+                       "As string: {}",
+                      String::from_utf8_lossy(&mem[0..len as usize])
+                 );
                 }
                 // TODO setup a thread to talk to STM via http
                 if term.load(Ordering::Relaxed) {

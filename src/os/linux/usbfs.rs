@@ -11,6 +11,7 @@ use mio::unix::EventedFd;
 use std::io;
 use std::slice;
 use std::result::Result;
+use std::collections::HashMap;
 impl Evented for UsbFs {
     fn register(
         &self,
@@ -114,16 +115,16 @@ pub struct UsbFsUrb {
     endpoint: u8,
     status: i32,
     flags: u32,
-    buffer: *mut libc::c_void,
-    buffer_length: i32,
-    actual_length: i32,
+    pub buffer: *mut u8,
+    pub buffer_length: i32,
+    pub actual_length: i32,
     start_frame: i32,
     // FIXMEUNION
     stream_id: i32,
     // UNION end...
     error_count: i32,
     signr: u32,
-    usercontext: *mut libc::c_void,
+    usercontext: *mut libc::c_void
 }
 
 #[repr(C)]
@@ -134,7 +135,7 @@ pub struct ControlTransfer {
     index: u16,
     length: u16,
     timeout: u32,
-    data: *mut libc::c_void,
+    data: *mut libc::c_void
 }
 
 // Sync bulk transfer
@@ -144,15 +145,15 @@ pub struct BulkTransfer {
     ep: u32,
     length: u32,
     timeout: u32,
-    data: *mut libc::c_void,
+    data: *mut libc::c_void
 }
 
 pub struct UsbFs {
     handle: std::fs::File,
     claims: Vec<u32>,
     capabilities: u32,
-    ptr: *mut libc::c_void,
-    urbs: Vec<UsbFsUrb>
+    urbs: HashMap<u8, UsbFsUrb>
+    //urbs: Vec<UsbFsUrb>
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -175,12 +176,10 @@ impl UsbFs {
                 ))?,
             claims: vec![],
             capabilities: 0,
-            ptr: ptr::null_mut(),
-            urbs: vec!()
+            urbs: HashMap::new(),
         };
 
         res.capabilities();
-        res.mmap(64);
 
         Ok(res)
     }
@@ -200,13 +199,9 @@ impl UsbFs {
     pub fn async_response(&mut self, e: Event) {
         println!("{:?}", e);
         println!("{:?}", self.urbs);
-        let ptr = self.ptr as *const u8;
-        let slice = unsafe { slice::from_raw_parts(ptr, 64 as usize) };
-        println!("{:?}", slice);
-    }
-
-    pub fn setup_endpoint(&mut self, ep: u8, size: u16) -> Result<(), nix::Error> {
-        Ok(())
+//        let ptr = self.ptr as *const u8;
+ //       let slice = unsafe { slice::from_raw_parts(ptr, 64 as usize) };
+        //println!("{:?}", slice);
     }
 
     pub fn claim_interface(&mut self, interface: u32) -> Result<(), nix::Error> {
@@ -299,49 +294,50 @@ impl UsbFs {
         Ok(0)
     }
 
-    fn mmap(&mut self, length: u16) -> Result<(), Error> {
-        if self.ptr == ptr::null_mut() {
-            let mut ptr = unsafe {
-                libc::mmap(
-                    ptr::null_mut(),
-                    length as libc::size_t,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED,
-                    self.handle.as_raw_fd(),
-                    0 as libc::off_t)
+    fn mmap(&mut self, length: u16) -> Result<*mut u8, Error> {
+        let mut ptr = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                length as libc::size_t,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                self.handle.as_raw_fd(),
+                0 as libc::off_t)
 
-            } as *mut u8;
+        } as *mut u8;
 
-            if ptr == ptr::null_mut() {
-                return Err(nix::Error::Sys(nix::errno::Errno::last()));
-            }
-            let slice = unsafe { slice::from_raw_parts_mut(ptr, length as usize) };
-            slice[0] = '$' as u8;
-           self.ptr = ptr as *mut libc::c_void;
+        if ptr == ptr::null_mut() {
+            return Err(nix::Error::Sys(nix::errno::Errno::last()));
         }
-        println!("{:X?}", self.ptr);
-        Ok(())
+        let slice = unsafe { slice::from_raw_parts_mut(ptr, length as usize) };
+        println!("{:X?}", ptr);
+        Ok(ptr)
     }
 
-    pub fn async_transfer(&mut self, ep: u8, length: u16) -> Result<i32, nix::Error> {
-        let urb = UsbFsUrb {
+    pub fn new_bulk(&mut self, ep: u8, length: u16) -> Result<UsbFsUrb, nix::Error>
+    {
+        let ptr = self.mmap(length)?;
+        Ok(UsbFsUrb {
             typ: USBFS_URB_TYPE_BULK,
             endpoint: ep,
             status: 0,
             flags: 0,
-            buffer: self.ptr as *mut libc::c_void,
+            buffer: ptr,// as *mut libc::c_void,
             buffer_length: length as i32,
             actual_length: 0 as i32,
             start_frame: 0,
             stream_id: 0,
             error_count: 0,
             signr: 0,
-            usercontext: self.ptr as *mut libc::c_void,
-        };
+            usercontext: ptr as *mut libc::c_void
+        })
+    }
+
+    pub fn async_transfer(&mut self, mut urb: UsbFsUrb) -> Result<i32, nix::Error> {
 
         println!("len {} {:02X?}", urb.buffer_length, urb.buffer);
         let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }?;
-        self.urbs.push(urb);
+        self.urbs.insert(urb.endpoint, urb);
         Ok(res)
     }
 }
