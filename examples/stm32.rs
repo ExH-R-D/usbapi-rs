@@ -22,7 +22,7 @@ fn main() {
             let mut usb = UsbFs::from_device(&device).expect("FIXME actually cant fail");
             let poll = Poll::new().unwrap();
             usb.register(&poll,
-             Token(0), Ready::all(), PollOpt::edge());
+             Token(0), Ready::writable(), PollOpt::edge());
 
              println!("Capabilities: 0x{:02X?}", usb.capabilities());
             usb.claim_interface(0).is_ok();
@@ -34,40 +34,49 @@ fn main() {
 
             let mut mem: [u8; 64] = [0; 64];
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
-            println!("{} data {:?}", len, &mem[0..len as usize]);
+            println!("1 {} data {:?}", len, &mem[0..len as usize]);
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
-            println!("{} data: {:?}", len, &mem[0..len as usize]);
+            println!("2 {} data: {:?}", len, &mem[0..len as usize]);
             let len = usb.bulk_write(1, "$".to_string().as_bytes()).unwrap_or(0);
-            println!("{} sent data", len);
+            println!("1 {} sent data", len);
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
             println!(
-                "As string: {}",
+                "3 As string: {}",
                 String::from_utf8_lossy(&mem[0..len as usize])
             );
 
             let urb = usb.new_bulk(0x1, 1).unwrap();
-            let slice = unsafe { std::slice::from_raw_parts_mut(urb.buffer, 1) };
+            let slice = urb.get_slice();
+            println!("{}", urb);
             slice[0] = '$' as u8;
             let len = usb.async_transfer(urb).unwrap_or(0);
-            println!("{} sent data", len);
+            println!("2 {} sent data", len);
             let mut events = Events::with_capacity(16);
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100)));
                 for e in &events {
-            //        usb.async_response(e);
-            //let len = usb.async_transfer(0x81, 64).unwrap_or(0);
-                    println!("event: {:?}", e);
-                      let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
-                    println!(
-                       "As string: {}",
-                      String::from_utf8_lossy(&mem[0..len as usize])
-                 );
+                    usb.async_response(e).unwrap();
+                    let rxurb = usb.new_bulk(0x81, 64).unwrap();
+                    //let mem = rxurb.get_slice();
+                    usb.async_transfer(rxurb).unwrap_or(0);
+                    println!("eventif: {:?}", e);
+                     // let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
+                    break;
                 }
                 // TODO setup a thread to talk to STM via http
                 if term.load(Ordering::Relaxed) {
                     break;
                 }
 //                thread::sleep(Duration::from_millis(100));
+            }
+            loop {
+                poll.poll(&mut events, Some(Duration::from_millis(100)));
+                for e in &events {
+                    usb.async_response(e).unwrap();
+                }
+                if term.load(Ordering::Relaxed) {
+                    break;
+                }
             }
             break;
         }
