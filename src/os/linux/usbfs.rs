@@ -114,7 +114,7 @@ union UrbUnion {
 pub struct UsbFsUrb {
     typ: u8,
     endpoint: u8,
-    status: i32,
+    pub status: i32,
     flags: u32,
     pub buffer: *mut u8,
     pub buffer_length: i32,
@@ -153,8 +153,7 @@ pub struct UsbFs {
     handle: std::fs::File,
     claims: Vec<u32>,
     capabilities: u32,
-    urbs: HashMap<u8, UsbFsUrb>
-    //urbs: Vec<UsbFsUrb>
+    urbs: HashMap<u8, UsbFsUrb>,
 }
 
 pub struct UrbPtr {
@@ -188,7 +187,11 @@ impl UsbFsUrb {
             usercontext: ptr as *mut libc::c_void
         }
     }
- 
+
+    pub fn zeroed() -> Self {
+        UsbFsUrb::new(0, ptr::null_mut(), 0)
+    }
+
     pub fn get_slice<'a>(&self) -> &'a mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.buffer, self.buffer_length as usize) }
     }
@@ -244,16 +247,17 @@ impl UsbFs {
     }
 
     pub fn async_response(&mut self, e: Event) -> Result<(), nix::Error> {
-        let urb: UsbFsUrb = unsafe { mem::zeroed() };
-        let urb = Box::into_raw(Box::new(urb));
-        println!("Pb {:?}", urb);
-        let res = unsafe { usb_reapurbndelay(self.handle.as_raw_fd(), &urb) }.unwrap();
-        println!("Pa {:?}", urb);
+        let urb = Box::into_raw(Box::new(UsbFsUrb::zeroed()));
+        unsafe { usb_reapurbndelay(self.handle.as_raw_fd(), &urb) }?;
         let urb = unsafe { Box::from_raw(urb) };
+        self.urbs.entry(urb.endpoint).and_modify(|e|{
+            e.status = urb.status;
+            e.actual_length = urb.actual_length;
+        });
         println!("p {:?}", urb);
 
         std::mem::forget(urb);
-         println!("event {:?}", e);
+        println!("event {:?}", e);
         for (ep, urb) in &self.urbs {
             let ptr = Box::into_raw(Box::new(urb));
             println!("Pb {:?}", ptr);
@@ -264,8 +268,6 @@ impl UsbFs {
                 String::from_utf8_lossy(&mem));
         }
 
-        // We will leak here :/
- //      println!("GOT\n {:?}", urb);
         Ok(())
     }
 
