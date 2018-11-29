@@ -6,9 +6,8 @@ use mio::{Events,Ready, Poll, PollOpt, Token, Evented};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
-fn main() {
+fn main() -> Result<(), std::io::Error> {
     let term = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGQUIT, Arc::clone(&term)).unwrap();
     signal_hook::flag::register(signal_hook::SIGTERM, Arc::clone(&term)).unwrap();
@@ -21,10 +20,9 @@ fn main() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
             let mut usb = UsbFs::from_device(&device).expect("FIXME actually cant fail");
             let poll = Poll::new().unwrap();
-            usb.register(&poll,
-             Token(0), Ready::writable(), PollOpt::edge());
+            usb.register(&poll, Token(0), Ready::writable(), PollOpt::edge())?;
 
-             println!("Capabilities: 0x{:02X?}", usb.capabilities());
+            println!("Capabilities: 0x{:02X?}", usb.capabilities());
             usb.claim_interface(0).is_ok();
             usb.claim_interface(1).is_ok();
             match usb.control() {
@@ -53,14 +51,12 @@ fn main() {
             println!("2 {} sent data", len);
             let mut events = Events::with_capacity(16);
             loop {
-                poll.poll(&mut events, Some(Duration::from_millis(100)));
+                poll.poll(&mut events, Some(Duration::from_millis(100))).unwrap_or(0);
                 for e in &events {
                     usb.async_response(e).unwrap();
                     let rxurb = usb.new_bulk(0x81, 64).unwrap();
-                    //let mem = rxurb.get_slice();
                     usb.async_transfer(rxurb).unwrap_or(0);
                     println!("eventif: {:?}", e);
-                     // let len = usb.bulk_read(1, &mut mem).unwrap_or(1);
                     break;
                 }
                 // TODO setup a thread to talk to STM via http
@@ -70,7 +66,7 @@ fn main() {
 //                thread::sleep(Duration::from_millis(100));
             }
             loop {
-                poll.poll(&mut events, Some(Duration::from_millis(100)));
+                poll.poll(&mut events, Some(Duration::from_millis(100)))?;
                 for e in &events {
                     usb.async_response(e).unwrap();
                 }
@@ -83,4 +79,5 @@ fn main() {
     }
 
     println!("Drop dead");
+    Ok(())
 }

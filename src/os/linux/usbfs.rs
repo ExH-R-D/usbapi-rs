@@ -9,7 +9,6 @@ use mio::{Event, Ready, Poll, PollOpt, Token};
 use mio::event::Evented;
 use mio::unix::EventedFd;
 use std::io;
-use std::slice;
 use std::result::Result;
 use std::collections::HashMap;
 use std::fmt;
@@ -103,6 +102,7 @@ pub struct UsbFsIoctl {
     data: *mut libc::c_void,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 union UrbUnion {
     number_of_packets: i32,
@@ -156,10 +156,6 @@ pub struct UsbFs {
     urbs: HashMap<u8, UsbFsUrb>,
 }
 
-pub struct UrbPtr {
-    ptr: *mut UsbFsUrb
-}
-
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
 ioctl_readwrite_ptr!(usb_bulk_transfer, b'U', 2, BulkTransfer);
 ioctl_write_ptr!(usb_get_driver, b'U', 8, UsbFsGetDriver);
@@ -199,16 +195,16 @@ impl UsbFsUrb {
 
 impl fmt::Display for UsbFsUrb {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "type: 0x{:02X}", self.typ);
-        writeln!(f, "endpoint: 0x{:02X}", self.endpoint);
-        writeln!(f, "status: 0x{:08X}", self.status);
-        writeln!(f, "flags: 0x{:08X}", self.flags);
-        writeln!(f, "buffer: {:X?}", self.buffer);
-        writeln!(f, "buffer_length: {}", self.buffer_length);
-        writeln!(f, "actual_length: {}", self.actual_length);
-        writeln!(f, "start_frame: {}", self.start_frame);
-        writeln!(f, "stream_id: {}", self.stream_id);
-        writeln!(f, "signr: {}", self.signr);
+        writeln!(f, "type: 0x{:02X}", self.typ)?;
+        writeln!(f, "endpoint: 0x{:02X}", self.endpoint)?;
+        writeln!(f, "status: 0x{:08X}", self.status)?;
+        writeln!(f, "flags: 0x{:08X}", self.flags)?;
+        writeln!(f, "buffer: {:X?}", self.buffer)?;
+        writeln!(f, "buffer_length: {}", self.buffer_length)?;
+        writeln!(f, "actual_length: {}", self.actual_length)?;
+        writeln!(f, "start_frame: {}", self.start_frame)?;
+        writeln!(f, "stream_id: {}", self.stream_id)?;
+        writeln!(f, "signr: {}", self.signr)?;
         writeln!(f, "usercontext: {:X?}", self.usercontext)
     }
 }
@@ -247,21 +243,22 @@ impl UsbFs {
     }
 
     pub fn async_response(&mut self, e: Event) -> Result<(), nix::Error> {
-        let urb = Box::into_raw(Box::new(UsbFsUrb::zeroed()));
-        unsafe { usb_reapurbndelay(self.handle.as_raw_fd(), &urb) }?;
-        let urb = unsafe { Box::from_raw(urb) };
+        let urb: *mut UsbFsUrb = ptr::null_mut();
+        let urb = unsafe {
+            usb_reapurbndelay(self.handle.as_raw_fd(), &urb)?;
+            &*urb
+        };
         self.urbs.entry(urb.endpoint).and_modify(|e|{
             e.status = urb.status;
             e.actual_length = urb.actual_length;
         });
-        println!("p {:?}", urb);
 
         std::mem::forget(urb);
         println!("event {:?}", e);
         for (ep, urb) in &self.urbs {
             let ptr = Box::into_raw(Box::new(urb));
             println!("Pb {:?}", ptr);
-             println!("{} {}", ep, urb);
+            println!("{} {}", ep, urb);
             let mem = urb.get_slice();
             println!(
                 "As string: {}",
@@ -362,7 +359,7 @@ impl UsbFs {
     }
 
     fn mmap(&mut self, length: usize) -> Result<*mut u8, Error> {
-        let ptr = unsafe {
+        let mut ptr = unsafe {
             libc::mmap(
                 ptr::null_mut(),
                 length as libc::size_t,
@@ -374,9 +371,12 @@ impl UsbFs {
         } as *mut u8;
 
         if ptr == ptr::null_mut() {
-            return Err(nix::Error::Sys(nix::errno::Errno::last()));
+            // if mmap fail we try malloc instead
+            ptr = unsafe { libc::calloc(1, length) as *mut u8};
+            if ptr == ptr::null_mut() {
+                return Err(nix::Error::Sys(nix::errno::Errno::ENOMEM));
+            }
         }
-        println!("{:X?}", ptr);
         Ok(ptr)
     }
 
