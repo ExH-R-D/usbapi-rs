@@ -18,6 +18,7 @@ You are free to fork or send pull request and ideas...
 ## TODO
 
 - [ ] Fix possible leak in sync_respond()
+- [ ] Add isochronous support
 
 ### For those who use below, feel free to send a pull request:
 

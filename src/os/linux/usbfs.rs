@@ -3,6 +3,7 @@ use os::linux::enumerate::UsbDevice;
 use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::mem;
+use std::time::Duration;
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 use mio::{Event, Ready, Poll, PollOpt, Token};
@@ -139,6 +140,20 @@ pub struct ControlTransfer {
     data: *mut libc::c_void
 }
 
+impl ControlTransfer {
+    pub fn new(request_type: u8, request: u8, value: u16, index: u16, mut data: Vec<u8>, timeout: u32) -> Self {
+        ControlTransfer {
+            request_type: request_type,
+            request: request,
+            value: value,
+            index: index,
+            length: data.len() as u16,
+            timeout: timeout,
+            data: data.as_mut_ptr() as *mut libc::c_void,
+        }
+    }
+}
+
 // Sync bulk transfer
 #[derive(Debug)]
 #[repr(C)]
@@ -173,7 +188,7 @@ impl UsbFsUrb {
             endpoint: ep,
             status: 0,
             flags: 0,
-            buffer: ptr,// as *mut libc::c_void,
+            buffer: ptr,
             buffer_length: length as i32,
             actual_length: 0 as i32,
             start_frame: 0,
@@ -273,40 +288,26 @@ impl UsbFs {
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         let driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
         let driver_name = driver_name.to_str().unwrap_or("");
-        println!("get_driver {:?} get_driver: {:?}", res, driver_name);
         if driver_name != "usbfs" {
             let mut disconnect: UsbFsIoctl = unsafe { mem::zeroed() };
             disconnect.interface = interface as i32;
             // Disconnect driver
             disconnect.code = request_code_none!(b'U', 22) as i32;
             let res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
-            println!("disconnect {:?}", res);
         }
 
         let res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
         self.claims.push(interface);
-        println!("claim {:?}", res);
         Ok(())
     }
 
     pub fn release_interface(&self, interface: u32) -> Result<(), nix::Error> {
-        let res = unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) }?;
-        println!("release {:?}", res);
+        unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) }?;
         Ok(())
     }
 
-    pub fn control(&self) -> Result<(), nix::Error> {
-        let control = ControlTransfer {
-            request_type: 0x21,
-            request: 0x22,
-            value: 0x3,
-            index: 0,
-            length: 0,
-            timeout: 100,
-            data: Vec::new().as_mut_ptr(),
-        };
-
-        let res = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &control) }?;
+    pub fn control(&self, ctrl: ControlTransfer) -> Result<(), nix::Error> {
+        let res = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &ctrl) }?;
         println!("control {:?}", res);
 
         Ok(())

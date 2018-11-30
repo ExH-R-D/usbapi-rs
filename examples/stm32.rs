@@ -1,7 +1,7 @@
 extern crate mio;
 extern crate usbapi;
 use usbapi::os::linux::enumerate::Enumerate;
-use usbapi::os::linux::usbfs::UsbFs;
+use usbapi::os::linux::usbfs::{UsbFs, ControlTransfer};
 use mio::{Events,Ready, Poll, PollOpt, Token, Evented};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +25,7 @@ fn main() -> Result<(), std::io::Error> {
             println!("Capabilities: 0x{:02X?}", usb.capabilities());
             usb.claim_interface(0).is_ok();
             usb.claim_interface(1).is_ok();
-            match usb.control() {
+            match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, vec!(), 100)) {
                 Ok(_) => {}
                 Err(err) => println!("Send bytes to control failed {}", err),
             };
