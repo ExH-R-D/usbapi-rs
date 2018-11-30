@@ -182,9 +182,9 @@ ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
 
 impl UsbFsUrb {
-    pub fn new(ep: u8, ptr: *mut u8, length: usize) -> Self {
+    pub fn new(typ: u8, ep: u8, ptr: *mut u8, length: usize) -> Self {
         UsbFsUrb {
-            typ: USBFS_URB_TYPE_BULK,
+            typ: typ,
             endpoint: ep,
             status: 0,
             flags: 0,
@@ -197,10 +197,6 @@ impl UsbFsUrb {
             signr: 0,
             usercontext: ptr as *mut libc::c_void
         }
-    }
-
-    pub fn zeroed() -> Self {
-        UsbFsUrb::new(0, ptr::null_mut(), 0)
     }
 
     pub fn get_slice<'a>(&self) -> &'a mut [u8] {
@@ -307,9 +303,7 @@ impl UsbFs {
     }
 
     pub fn control(&self, ctrl: ControlTransfer) -> Result<(), nix::Error> {
-        let res = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &ctrl) }?;
-        println!("control {:?}", res);
-
+        unsafe { usb_control_transfer(self.handle.as_raw_fd(), &ctrl) }?;
         Ok(())
     }
 
@@ -383,8 +377,21 @@ impl UsbFs {
 
     pub fn new_bulk(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
         let ptr = self.mmap(length)?;
-        Ok(UsbFsUrb::new(ep, ptr, length))
+        Ok(UsbFsUrb::new(USBFS_URB_TYPE_BULK, ep, ptr, length))
     }
+
+    // Untested
+    pub fn new_isochronous(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
+        let ptr = self.mmap(length)?;
+        Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, length))
+    }
+
+    // Untested
+    pub fn new_interrupt(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
+        let ptr = self.mmap(length)?;
+        Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, length))
+    }
+
 
     pub fn async_transfer(&mut self, urb: UsbFsUrb) -> Result<i32, nix::Error> {
         println!("len {} {:02X?}", urb.buffer_length, urb.buffer);
