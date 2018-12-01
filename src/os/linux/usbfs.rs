@@ -110,25 +110,6 @@ union UrbUnion {
     stream_id: u32,
 }
 
-#[derive(Debug)]
-#[repr(C)]
-pub struct UsbFsUrb {
-    typ: u8,
-    endpoint: u8,
-    pub status: i32,
-    flags: u32,
-    pub buffer: *mut u8,
-    pub buffer_length: i32,
-    pub actual_length: i32,
-    start_frame: i32,
-    // FIXMEUNION
-    stream_id: i32,
-    // UNION end...
-    error_count: i32,
-    signr: u32,
-    usercontext: *mut libc::c_void
-}
-
 #[repr(C)]
 pub struct ControlTransfer {
     request_type: u8,
@@ -137,7 +118,7 @@ pub struct ControlTransfer {
     index: u16,
     length: u16,
     timeout: u32,
-    data: *mut libc::c_void
+    data: *mut u8
 }
 
 impl ControlTransfer {
@@ -147,9 +128,9 @@ impl ControlTransfer {
             request: request,
             value: value,
             index: index,
-            length: data.len() as u16,
+            length: data.capacity() as u16,
             timeout: timeout,
-            data: data.as_mut_ptr() as *mut libc::c_void,
+            data: data.as_mut_ptr(),
         }
     }
 }
@@ -180,6 +161,25 @@ ioctl_read_ptr!(usb_claim_interface, b'U', 15, u32);
 ioctl_read_ptr!(usb_release_interface, b'U', 16, u32);
 ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct UsbFsUrb {
+    typ: u8,
+    endpoint: u8,
+    pub status: i32,
+    flags: u32,
+    pub buffer: *mut u8,
+    pub buffer_length: i32,
+    pub actual_length: i32,
+    start_frame: i32,
+    // FIXMEUNION
+    stream_id: i32,
+    // UNION end...
+    error_count: i32,
+    signr: u32,
+    usercontext: *mut libc::c_void
+}
 
 impl UsbFsUrb {
     pub fn new(typ: u8, ep: u8, ptr: *mut u8, length: usize) -> Self {
@@ -253,32 +253,45 @@ impl UsbFs {
         Ok(self.capabilities)
     }
 
-    pub fn async_response(&mut self, e: Event) -> Result<(), nix::Error> {
+    /// Returns latest transmitted async result or an error.
+    /// Example:
+    /// ```
+    /// let mut urb = usb.new_bulk(1, 64);
+    /// let urb = usb.async_response()
+    /// ```
+    pub fn async_response(&mut self) -> Result<UsbFsUrb, nix::Error> {
         let urb: *mut UsbFsUrb = ptr::null_mut();
         let urb = unsafe {
             usb_reapurbndelay(self.handle.as_raw_fd(), &urb)?;
             &*urb
         };
-        self.urbs.entry(urb.endpoint).and_modify(|e|{
-            e.status = urb.status;
-            e.actual_length = urb.actual_length;
-        });
-
         std::mem::forget(urb);
-        println!("event {:?}", e);
-        for (ep, urb) in &self.urbs {
-            let ptr = Box::into_raw(Box::new(urb));
-            println!("Pb {:?}", ptr);
-            println!("{} {}", ep, urb);
-            let mem = urb.get_slice();
-            println!(
-                "As string: {}",
-                String::from_utf8_lossy(&mem));
-        }
+        let surb = match self.urbs.remove(&urb.endpoint) {
+            Some(mut u) => {
+                u.status = urb.status;
+                u.actual_length = urb.actual_length;
+                u
+            },
+            None => {
+                eprintln!("EP: {} not exists in hashmap?", urb.endpoint);
+                UsbFsUrb::new(0xFF, urb.endpoint, ptr::null_mut(), 0)
+            }
+        };
 
-        Ok(())
+        Ok(surb)
     }
 
+    /// Claim interface
+    ///
+    /// * the `interface` number to claim
+    ///
+    /// Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// usb.claim_interface(1)
+    /// ```
+    ///
     pub fn claim_interface(&mut self, interface: u32) -> Result<(), nix::Error> {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
@@ -297,14 +310,37 @@ impl UsbFs {
         Ok(())
     }
 
+    /// Release interface
+    ///
+    /// * the `interface` number to claim
+    ///
+    /// Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// usb.release_interface(1)
+    /// ```
+    ///
     pub fn release_interface(&self, interface: u32) -> Result<(), nix::Error> {
         unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) }?;
         Ok(())
     }
 
-    pub fn control(&self, ctrl: ControlTransfer) -> Result<(), nix::Error> {
-        unsafe { usb_control_transfer(self.handle.as_raw_fd(), &ctrl) }?;
-        Ok(())
+    /// Send control
+    ///
+    /// * `ControlTransfer` structure.
+    ///
+    /// Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, vec!(), 100);
+    /// ```
+    ///
+    pub fn control(&self, mut ctrl: ControlTransfer) -> Result<ControlTransfer, nix::Error> {
+        let len = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &ctrl) }?;
+        ctrl.length = len as u16;
+        Ok(ctrl)
     }
 
     pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32, nix::Error> {
@@ -351,6 +387,22 @@ impl UsbFs {
         }
 
         Ok(0)
+    }
+
+    pub fn get_descriptor_string(&mut self, id: u8) -> String {
+        let vec = Vec::with_capacity(128);
+        match self.control(ControlTransfer::new(0x80, 0x06, 0x0300 | id as u16, 0, vec, 100)) {
+            Ok(ctrl) => {
+                let utf = unsafe {
+                    std::slice::from_raw_parts(ctrl.data, ctrl.length as usize)
+                };
+                return String::from_utf8_lossy(utf).to_string();
+            },
+            Err(e) => {
+                eprintln!("Control transfer failed {}", e);
+            }
+        }
+        "".to_string()
     }
 
     fn mmap(&mut self, length: usize) -> Result<*mut u8, Error> {

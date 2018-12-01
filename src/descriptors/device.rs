@@ -2,20 +2,20 @@ use std::slice::Iter;
 use std::fmt;
 use descriptors::configuration::Configuration;
 pub struct Device {
-    length: u8,
-    kind: u8,
-    bcd_usb: u16,
-    device_class: u8,
-    device_sub_class: u8,
-    device_protocol: u8,
-    max_packet_size0: u8,
+    pub length: u8,
+    pub kind: u8,
+    pub bcd_usb: u16,
+    pub device_class: u8,
+    pub device_sub_class: u8,
+    pub device_protocol: u8,
+    pub max_packet_size0: u8,
     pub id_vendor: u16,
     pub id_product: u16,
-    bcd_device: u16,
-    imanufacturer: u8,
-    iproduct: u8,
-    iserial_number: u8,
-    num_configurations: u8,
+    pub bcd_device: u16,
+    pub imanufacturer: u8,
+    pub iproduct: u8,
+    pub iserial_number: u8,
+    pub num_configurations: u8,
     pub configurations: Vec<Configuration>
 }
 

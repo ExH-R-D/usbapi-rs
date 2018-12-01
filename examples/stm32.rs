@@ -24,6 +24,9 @@ fn main() -> Result<(), std::io::Error> {
 
             println!("Capabilities: 0x{:02X?}", usb.capabilities());
             usb.claim_interface(0).is_ok();
+            println!("Manufacturer: {}", usb.get_descriptor_string(device.device.imanufacturer));
+            println!("Product: {}", usb.get_descriptor_string(device.device.iproduct));
+            println!("Serial: {}", usb.get_descriptor_string(device.device.iserial_number));
             usb.claim_interface(1).is_ok();
             match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, vec!(), 100)) {
                 Ok(_) => {}
@@ -53,7 +56,8 @@ fn main() -> Result<(), std::io::Error> {
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100))).unwrap_or(0);
                 for e in &events {
-                    usb.async_response(e).unwrap();
+                    let urb = usb.async_response().unwrap();
+                    println!("{}", urb);
                     let rxurb = usb.new_bulk(0x81, 64).unwrap();
                     usb.async_transfer(rxurb).unwrap_or(0);
                     println!("eventif: {:?}", e);
@@ -68,7 +72,7 @@ fn main() -> Result<(), std::io::Error> {
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100)))?;
                 for e in &events {
-                    usb.async_response(e).unwrap();
+                    usb.async_response().unwrap();
                 }
                 if term.load(Ordering::Relaxed) {
                     break;
