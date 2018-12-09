@@ -18,7 +18,7 @@ fn main() -> Result<(), std::io::Error> {
 
     for device in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
-            let mut usb = UsbFs::from_device(&device).expect("FIXME actually cant fail");
+            let mut usb = UsbFs::from_device(&device).expect("Could not open device");
             let poll = Poll::new().unwrap();
             usb.register(&poll, Token(0), Ready::writable(), PollOpt::edge())?;
 

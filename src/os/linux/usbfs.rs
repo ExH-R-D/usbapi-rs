@@ -394,9 +394,9 @@ impl UsbFs {
         match self.control(ControlTransfer::new(0x80, 0x06, 0x0300 | id as u16, 0, vec, 100)) {
             Ok(ctrl) => {
                 let utf = unsafe {
-                    std::slice::from_raw_parts(ctrl.data, ctrl.length as usize)
+                    std::slice::from_raw_parts(ctrl.data as *const u16, (ctrl.length/2) as usize)
                 };
-                return String::from_utf8_lossy(utf).to_string();
+                return String::from_utf16_lossy(utf).to_string();
             },
             Err(e) => {
                 eprintln!("Control transfer failed {}", e);
