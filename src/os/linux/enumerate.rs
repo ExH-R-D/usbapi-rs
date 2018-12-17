@@ -32,17 +32,20 @@ impl UsbDevice {
     }
 }
 
-pub struct Enumerate {
+pub struct UsbEnumerate {
     pub devices: Vec<UsbDevice>,
 }
 
-impl Enumerate {
+impl UsbEnumerate {
     pub fn new() -> Self {
-        Enumerate { devices: vec![]}
+        UsbEnumerate { devices: vec![]}
     }
 
-    pub fn enumerate(&mut self, dir: &Path) -> io::Result<()> {
-        // FIXME better recurive checks. Should probabdly stop if uknown
+    pub fn enumerate(&mut self) -> io::Result<()> {
+        self.read_dir(Path::new("/dev/bus/usb/"))
+    }
+
+    fn read_dir(&mut self, dir: &Path) -> io::Result<()> {
         for entry in fs::read_dir(dir).expect("Can't acces usbpath?") {
             let entry = match entry {
                 Ok(e) => e,
@@ -50,10 +53,10 @@ impl Enumerate {
             };
             let path = entry.path();
             if path.is_dir() {
-                self.enumerate(&path)?;
+                self.read_dir(&path)?;
             } else {
-                let bus: u8 = path.parent().unwrap().file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is broken could not parse as u8");
-                let address: u8 = path.file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is smoking could not parse dirname");
+                let bus: u8 = path.parent().unwrap().file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is broken could not parse bus as u8");
+                let address: u8 = path.file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is smoking could not parse address from dirname {}");
                 self.add_device(&entry, bus, address);
             }
         }

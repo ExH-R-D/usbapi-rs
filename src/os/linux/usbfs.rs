@@ -343,6 +343,8 @@ impl UsbFs {
         Ok(ctrl)
     }
 
+    /// Syncrone bulk read
+    /// Consider use @async_transfer() instead.
     pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32, nix::Error> {
         self.bulk(
             0x80 | ep,
@@ -351,6 +353,8 @@ impl UsbFs {
         )
     }
 
+    /// Syncrone bulk write
+    /// consider use @async_transfer() instead
     pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> Result<u32, nix::Error> {
         // TODO error if ep highest is set eg BULK_READ?
         self.bulk(
@@ -427,24 +431,29 @@ impl UsbFs {
         Ok(ptr)
     }
 
+    /// Setup a new bulk package for async send or recieve
+    /// * `ep` Endpoint
+    /// * `length` max length
+    /// * Returns UsbFsUrb with malloc'ed transfer buffer.
     pub fn new_bulk(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
         let ptr = self.mmap(length)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_BULK, ep, ptr, length))
     }
 
-    // Untested
+    /// Untested
     pub fn new_isochronous(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
         let ptr = self.mmap(length)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, length))
     }
 
-    // Untested
+    /// Untested
     pub fn new_interrupt(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
         let ptr = self.mmap(length)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, length))
     }
 
-
+    /// Send a async transfer
+    /// It is up to thbe enduser to poll the file descriptor for a result.
     pub fn async_transfer(&mut self, urb: UsbFsUrb) -> Result<i32, nix::Error> {
         println!("len {} {:02X?}", urb.buffer_length, urb.buffer);
         let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }?;

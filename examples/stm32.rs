@@ -1,7 +1,7 @@
 extern crate mio;
 extern crate usbapi;
-use usbapi::os::linux::enumerate::Enumerate;
-use usbapi::os::linux::usbfs::{UsbFs, ControlTransfer};
+use usbapi::UsbEnumerate;
+use usbapi::{UsbCore, ControlTransfer};
 use mio::{Events,Ready, Poll, PollOpt, Token, Evented};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,12 +13,12 @@ fn main() -> Result<(), std::io::Error> {
     signal_hook::flag::register(signal_hook::SIGTERM, Arc::clone(&term)).unwrap();
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&term)).unwrap();
 
-    let mut usb = Enumerate::new();
-    usb.enumerate(Path::new("/dev/bus/usb/")).expect("Could not find /dev/bus/usb are you running windows or maybe freebsd or mac or... whatever feel free to add a patch :)");
+    let mut usb = UsbEnumerate::new();
+    usb.enumerate().expect("Could not find /dev/bus/usb are you running windows or maybe freebsd or mac or... whatever feel free to add a patch :)");
 
     for device in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
-            let mut usb = UsbFs::from_device(&device).expect("Could not open device");
+            let mut usb = UsbCore::from_device(&device).expect("Could not open device");
             let poll = Poll::new().unwrap();
             usb.register(&poll, Token(0), Ready::writable(), PollOpt::edge())?;
 
