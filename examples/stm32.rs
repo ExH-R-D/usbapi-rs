@@ -1,6 +1,4 @@
-extern crate mio;
-use usbapi::os::UsbEnumerate;
-use usbapi::os::{UsbCore, ControlTransfer};
+use usbapi::{UsbEnumerate, UsbCore, ControlTransfer};
 use mio::{Events,Ready, Poll, PollOpt, Token, Evented};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};

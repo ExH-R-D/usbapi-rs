@@ -1,4 +1,4 @@
-use usbapi::os::UsbEnumerate;
+use usbapi::UsbEnumerate;
 use std::path::Path as Path;
 fn main() {
     let mut usb = UsbEnumerate::new();
