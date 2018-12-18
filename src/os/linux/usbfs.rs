@@ -1,5 +1,5 @@
 use nix::*;
-use os::linux::enumerate::UsbDevice;
+use crate::os::linux::enumerate::UsbDevice;
 use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::mem;

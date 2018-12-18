@@ -1,6 +1,6 @@
 use std::slice::Iter;
 use std::fmt;
-use descriptors::endpoint::Endpoint;
+use crate::descriptors::endpoint::Endpoint;
 pub struct Interface {
     length: u8,
     kind: u8,

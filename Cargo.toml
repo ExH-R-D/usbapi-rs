@@ -2,9 +2,11 @@
 name = "usbapi"
 version = "0.0.1"
 authors = ["Mikael Hermansson <mikael.hermansson@mykolab.com>"]
-keywords = ["usb", "usbfs", "hardware"]
+keywords = ["usb", "usbcore", "hardware"]
+edition="2018"
 
 [dependencies]
+libc=""
 nix=""
 signal-hook = "0.1.5"
 crate = "0.0.2"

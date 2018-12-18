@@ -1,6 +1,6 @@
 use std::slice::Iter;
 use std::fmt;
-use descriptors::configuration::Configuration;
+use crate::descriptors::configuration::Configuration;
 pub struct Device {
     pub length: u8,
     pub kind: u8,

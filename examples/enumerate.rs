@@ -1,5 +1,4 @@
-extern crate usbapi;
-use usbapi::UsbEnumerate;
+use usbapi::os::UsbEnumerate;
 use std::path::Path as Path;
 fn main() {
     let mut usb = UsbEnumerate::new();

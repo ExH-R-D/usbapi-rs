@@ -1,6 +1,6 @@
 use std::slice::Iter;
 use std::fmt;
-use descriptors::interface::Interface;
+use crate::descriptors::interface::Interface;
 
 pub struct Configuration {
     length: u8,

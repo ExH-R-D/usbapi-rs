@@ -4,11 +4,11 @@ use std::path::Path as Path;
 use std::io::prelude::*;
 use std::slice::Iter;
 use std::fmt;
-use descriptors::device::Device;
-use descriptors::configuration::Configuration;
-use descriptors::interface::Interface;
-use descriptors::endpoint::Endpoint;
-use descriptors::descriptor::{Descriptor, DescriptorType};
+use crate::descriptors::device::Device;
+use crate::descriptors::configuration::Configuration;
+use crate::descriptors::interface::Interface;
+use crate::descriptors::endpoint::Endpoint;
+use crate::descriptors::descriptor::{Descriptor, DescriptorType};
 
 pub struct UsbDevice {
     pub bus: u8,
