@@ -178,7 +178,7 @@ pub struct UsbFsUrb {
     // UNION end...
     error_count: i32,
     signr: u32,
-    usercontext: *mut libc::c_void
+    usercontext: *mut u8
 }
 
 impl UsbFsUrb {
@@ -195,7 +195,7 @@ impl UsbFsUrb {
             stream_id: 0,
             error_count: 0,
             signr: 0,
-            usercontext: ptr as *mut libc::c_void
+            usercontext: ptr
         }
     }
 
@@ -220,6 +220,51 @@ impl fmt::Display for UsbFsUrb {
     }
 }
 
+enum UsbError {
+    NotImplemeted
+}
+
+// EXPERIMENTAL FIXME error should not be nix::Error
+// Also it should be put in another file...
+pub trait UsbTransfer<T> {
+    fn buffer_from_raw_mut<'a>(&self) -> &'a mut [u8];
+    fn buffer_from_raw<'a>(&self) -> &'a [u8];
+}
+
+pub trait UsbCoreTransfer<T> {
+    fn new_bulk(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
+   fn new_interrupt(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
+    fn new_isochronous(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
+    // Fells akward need to rethink
+}
+
+impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
+    fn buffer_from_raw_mut<'a>(&self) -> &'a mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.buffer, self.buffer_length as usize) }
+    }
+
+    fn buffer_from_raw<'a>(&self) -> &'a [u8] {
+        unsafe { std::slice::from_raw_parts(self.buffer, self.buffer_length as usize) }
+    }
+}
+
+impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
+    fn new_bulk(&mut self, ep: u8, size: usize) -> Result<UsbFsUrb, nix::Error> {
+        let ptr = self.mmap(size)?;
+        Ok(UsbFsUrb::new(USBFS_URB_TYPE_BULK, ep, ptr, size))
+    }
+
+    fn new_interrupt(&mut self, ep: u8, size: usize) -> Result<UsbFsUrb, nix::Error> {
+        let ptr = self.mmap(size)?;
+        Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, size))
+    }
+
+    fn new_isochronous(&mut self, ep: u8, size: usize) -> Result<UsbFsUrb, nix::Error> {
+        let ptr = self.mmap(size)?;
+        Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, size))
+    }
+
+}
 
 impl UsbFs {
    pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
@@ -431,13 +476,17 @@ impl UsbFs {
         Ok(ptr)
     }
 
+/*
     /// Setup a new bulk package for async send or recieve
     /// * `ep` Endpoint
     /// * `length` max length
     /// * Returns UsbFsUrb with malloc'ed transfer buffer.
     pub fn new_bulk(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
         let ptr = self.mmap(length)?;
-        Ok(UsbFsUrb::new(USBFS_URB_TYPE_BULK, ep, ptr, length))
+        let mut urb = UsbFsUrb::new_bulk(ep, length)?;
+        urb.buffer = ptr as *mut libc::c_void
+ ;
+        Ok(urb)
     }
 
     /// Untested
@@ -451,6 +500,7 @@ impl UsbFs {
         let ptr = self.mmap(length)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, length))
     }
+    */
 
     /// Send a async transfer
     /// It is up to thbe enduser to poll the file descriptor for a result.

@@ -1,4 +1,4 @@
-use usbapi::{UsbEnumerate, UsbCore, ControlTransfer};
+use usbapi::*;
 use mio::{Events,Ready, Poll, PollOpt, Token, Evented};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,32 +33,41 @@ fn main() -> Result<(), std::io::Error> {
             let mut mem: [u8; 64] = [0; 64];
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
             println!("1 {} data {:?}", len, &mem[0..len as usize]);
+            assert!(len > 0);
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
             println!("2 {} data: {:?}", len, &mem[0..len as usize]);
+            assert!(len == 0);
             let len = usb.bulk_write(1, "$".to_string().as_bytes()).unwrap_or(0);
+            assert!(len == 1);
             println!("1 {} sent data", len);
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
+            assert!(len > 0);
             println!(
                 "3 As string: {}",
                 String::from_utf8_lossy(&mem[0..len as usize])
             );
 
             let urb = usb.new_bulk(0x1, 1).unwrap();
-            let slice = urb.get_slice();
-            println!("{}", urb);
+            let slice = urb.buffer_from_raw_mut();
+            println!("New URB {}", urb);
             slice[0] = '$' as u8;
             let len = usb.async_transfer(urb).unwrap_or(0);
+            // Async return 0 in case of success
+            println!("length {}", len);
+            assert!(len == 0);
             println!("2 {} sent data", len);
             let mut events = Events::with_capacity(16);
-            loop {
+            let mut run = true;
+            while run {
                 poll.poll(&mut events, Some(Duration::from_millis(100))).unwrap_or(0);
                 for e in &events {
+                    println!("eventif: {:?}", e);
                     let urb = usb.async_response().unwrap();
                     println!("{}", urb);
+                    // Read
                     let rxurb = usb.new_bulk(0x81, 64).unwrap();
                     usb.async_transfer(rxurb).unwrap_or(0);
-                    println!("eventif: {:?}", e);
-                    break;
+                    run = false;
                 }
                 // TODO setup a thread to talk to STM via http
                 if term.load(Ordering::Relaxed) {
@@ -69,8 +78,13 @@ fn main() -> Result<(), std::io::Error> {
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100)))?;
                 for e in &events {
-                    usb.async_response().unwrap();
-                }
+                    let resp = usb.async_response().unwrap();
+                    println!("Urb Response on a read {}", resp);
+                    let slice = resp.buffer_from_raw();
+                    println!("got string: {}", String::from_utf8_lossy(&slice));
+                    let rxurb = usb.new_bulk(0x81, 64).unwrap();
+                    usb.async_transfer(rxurb).unwrap_or(0);
+                 }
                 if term.load(Ordering::Relaxed) {
                     break;
                 }

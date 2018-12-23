@@ -1,7 +1,6 @@
 use std::slice::Iter;
 use std::fmt;
 use crate::descriptors::interface::Interface;
-
 pub struct Configuration {
     length: u8,
     kind: u8,
