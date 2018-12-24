@@ -1,6 +1,7 @@
 use std::slice::Iter;
 use std::fmt;
 use crate::descriptors::configuration::Configuration;
+#[derive(Serialize, Deserialize)]
 pub struct Device {
     pub length: u8,
     pub kind: u8,

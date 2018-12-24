@@ -26,7 +26,7 @@ impl From<u8> for DescriptorType {
             0x24 => DescriptorType::ClassSpecific,
             0x29 => DescriptorType::Hub,
             0x30 => DescriptorType::SsEndpointCompanion,
-            n => DescriptorType::Unknown
+            _n => DescriptorType::Unknown
         }
     }
 }

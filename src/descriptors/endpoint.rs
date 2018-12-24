@@ -1,5 +1,6 @@
 use std::slice::Iter;
 use std::fmt;
+#[derive(Serialize, Deserialize)]
 pub struct Endpoint {
     length: u8,
     kind: u8,

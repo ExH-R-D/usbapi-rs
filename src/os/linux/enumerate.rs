@@ -10,6 +10,7 @@ use crate::descriptors::interface::Interface;
 use crate::descriptors::endpoint::Endpoint;
 use crate::descriptors::descriptor::{Descriptor, DescriptorType};
 
+#[derive(Serialize, Deserialize)]
 pub struct UsbDevice {
     pub bus: u8,
     pub address: u8,

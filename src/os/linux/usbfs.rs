@@ -339,7 +339,7 @@ impl UsbFs {
     ///
     pub fn claim_interface(&mut self, interface: u32) -> Result<(), nix::Error> {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
-        let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
+        let _res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         let driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
         let driver_name = driver_name.to_str().unwrap_or("");
         if driver_name != "usbfs" {
@@ -347,10 +347,10 @@ impl UsbFs {
             disconnect.interface = interface as i32;
             // Disconnect driver
             disconnect.code = request_code_none!(b'U', 22) as i32;
-            let res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
+            let _res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
         }
 
-        let res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
+        let _res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
         self.claims.push(interface);
         Ok(())
     }

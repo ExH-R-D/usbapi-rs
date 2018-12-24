@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate serde_derive;
+use serde_json;
 use nix::*;
 pub mod descriptors;
 pub mod os;

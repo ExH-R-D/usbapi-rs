@@ -77,7 +77,7 @@ fn main() -> Result<(), std::io::Error> {
             }
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100)))?;
-                for e in &events {
+                for _e in &events {
                     let resp = usb.async_response().unwrap();
                     println!("Urb Response on a read {}", resp);
                     let slice = resp.buffer_from_raw();

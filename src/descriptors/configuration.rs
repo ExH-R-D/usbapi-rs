@@ -1,6 +1,8 @@
 use std::slice::Iter;
 use std::fmt;
 use crate::descriptors::interface::Interface;
+use json;
+#[derive(Serialize, Deserialize)]
 pub struct Configuration {
     length: u8,
     kind: u8,
