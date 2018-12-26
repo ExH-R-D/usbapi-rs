@@ -13,7 +13,7 @@ fn main() -> Result<(), std::io::Error> {
     let mut usb = UsbEnumerate::new();
     usb.enumerate().expect("Could not find /dev/bus/usb are you running windows or maybe freebsd or mac or... whatever feel free to add a patch :)");
 
-    for device in usb.devices() {
+    for (bus_address, device) in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
             let mut usb = UsbCore::from_device(&device).expect("Could not open device");
             let poll = Poll::new().unwrap();

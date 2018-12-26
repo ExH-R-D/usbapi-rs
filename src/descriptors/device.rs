@@ -3,6 +3,7 @@ use std::fmt;
 use crate::descriptors::configuration::Configuration;
 use serde::{Deserialize, Serialize};
 use serde_hex::{SerHex, StrictPfx};
+use toml;
 
 #[derive(Serialize, Deserialize)]
 pub struct Device {
@@ -29,6 +30,8 @@ pub struct Device {
 
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let d = toml::to_string(self);
+        /*
         let mut d = format!("bLength: {}\n", self.length);
         d+=&format!("bDescriptorType: {:?}\n", self.kind);
         d+=&format!("bcdUsb: 0x{:04x}\n", self.bcd_usb);
@@ -46,7 +49,8 @@ impl fmt::Display for Device {
         for conf in &self.configurations {
             d+=&format!("{}", conf);
         }
-        write!(f, "{}", d)
+        */
+        write!(f, "{}", d.unwrap())
     }
 }
 

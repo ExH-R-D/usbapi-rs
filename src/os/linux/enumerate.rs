@@ -3,6 +3,7 @@ use std::fs::{self,DirEntry, File};
 use std::path::Path as Path;
 use std::io::prelude::*;
 use std::slice::Iter;
+use std::collections::HashMap;
 use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::descriptors::device::Device;
@@ -35,12 +36,12 @@ impl UsbDevice {
 }
 
 pub struct UsbEnumerate {
-    pub devices: Vec<UsbDevice>,
+    pub devices: HashMap<String, UsbDevice>,
 }
 
 impl UsbEnumerate {
     pub fn new() -> Self {
-        UsbEnumerate { devices: vec![]}
+        UsbEnumerate { devices: HashMap::new()}
     }
 
     pub fn enumerate(&mut self) -> io::Result<()> {
@@ -98,7 +99,8 @@ impl UsbEnumerate {
                 }
             };
         }
-        self.devices.push(device);
+        let bus_address = format!("{}-{}", device.bus, device.address).to_string();
+        self.devices.insert(bus_address, device);
     }
 
     fn add_configuration(&self, usb: &mut UsbDevice, iter_desc: &mut Iter<u8>) {
@@ -127,17 +129,13 @@ impl UsbEnumerate {
         };
     }
 
-    pub fn devices(&self) -> &Vec<UsbDevice> {
+    pub fn devices(&self) -> &HashMap<String, UsbDevice> {
         return &self.devices;
     }
 
     pub fn get_device_from_bus(&self, bus: u8, address: u8) -> Option<&UsbDevice> {
-        for usb in &self.devices {
-            if usb.bus == bus && usb.address == address {
-                return Some(&usb);
-            }
-        };
-        None
+        let bus_address = format!("{}-{}", bus, address).to_string();
+        self.devices.get(&bus_address)
     }
 }
 
