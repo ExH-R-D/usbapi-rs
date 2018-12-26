@@ -31,25 +31,6 @@ pub struct Device {
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let d = toml::to_string(self);
-        /*
-        let mut d = format!("bLength: {}\n", self.length);
-        d+=&format!("bDescriptorType: {:?}\n", self.kind);
-        d+=&format!("bcdUsb: 0x{:04x}\n", self.bcd_usb);
-        d+=&format!("bDeviceClass: {}\n", self.device_class);
-        d+=&format!("bDeviceSubClass: {}\n", self.device_sub_class);
-        d+=&format!("bDeviceProtocol: {}\n", self.device_protocol);
-        d+=&format!("bMaxPacketSize: {}\n", self.max_packet_size0);
-        d+=&format!("idVendor: 0x{:04x}\n", self.id_vendor);
-        d+=&format!("idProduct: 0x{:04x}\n", self.id_product);
-        d+=&format!("bcdDevice: 0x{:04x}\n", self.bcd_device);
-        d+=&format!("iManufacturer: {}\n", self.imanufacturer);
-        d+=&format!("iProduct: {}\n", self.iproduct);
-        d+=&format!("iSerialNumber: {}\n", self.iserial_number);
-        d+=&format!("bNumConfigurations: {}\n", self.num_configurations);
-        for conf in &self.configurations {
-            d+=&format!("{}", conf);
-        }
-        */
         write!(f, "{}", d.unwrap())
     }
 }
