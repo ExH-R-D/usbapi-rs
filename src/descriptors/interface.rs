@@ -1,6 +1,7 @@
 use std::slice::Iter;
 use std::fmt;
 use crate::descriptors::endpoint::Endpoint;
+use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct Interface {
     length: u8,

@@ -4,6 +4,7 @@ use std::path::Path as Path;
 use std::io::prelude::*;
 use std::slice::Iter;
 use std::fmt;
+use serde::{Deserialize, Serialize};
 use crate::descriptors::device::Device;
 use crate::descriptors::configuration::Configuration;
 use crate::descriptors::interface::Interface;

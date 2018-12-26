@@ -1,17 +1,24 @@
 use std::slice::Iter;
 use std::fmt;
 use crate::descriptors::configuration::Configuration;
+use serde::{Deserialize, Serialize};
+use serde_hex::{SerHex, StrictPfx};
+
 #[derive(Serialize, Deserialize)]
 pub struct Device {
     pub length: u8,
     pub kind: u8,
+    #[serde(with = "SerHex::<StrictPfx>")]
     pub bcd_usb: u16,
     pub device_class: u8,
     pub device_sub_class: u8,
     pub device_protocol: u8,
     pub max_packet_size0: u8,
+    #[serde(with = "SerHex::<StrictPfx>")]
     pub id_vendor: u16,
+    #[serde(with = "SerHex::<StrictPfx>")]
     pub id_product: u16,
+    #[serde(with = "SerHex::<StrictPfx>")]
     pub bcd_device: u16,
     pub imanufacturer: u8,
     pub iproduct: u8,
