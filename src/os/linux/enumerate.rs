@@ -82,25 +82,23 @@ impl UsbEnumerate {
         let mut device = UsbDevice::new(bus, address, &mut device.iter()).expect("Could not add DeviceDescriptor");
         for current in desc {
             // still unhappy with my implemention could probably be done better...
-            if current.len() == 0 {
-                continue;
+            if current.len() > 1 {
+                let kind = current[1];// as DescriptorType;
+                match DescriptorType::from(kind){
+                    DescriptorType::Configuration => {
+                        self.add_configuration(&mut device, &mut current.iter())
+                    },
+                    DescriptorType::Interface => {
+                        self.add_interface(&mut device, &mut current.iter())
+                    },
+                    DescriptorType::Endpoint => {
+                        self.add_endpoint(&mut device, &mut current.iter())
+                    }
+                    _ => {
+                        println!("{}:{} FIXME DescriptorType {} {:02X?}", device.bus, device.address, kind, current);
+                    }
+                };
             }
-            let kind = current[1];// as DescriptorType;
-            match DescriptorType::from(kind){
-                DescriptorType::Configuration => {
-                    self.add_configuration(&mut device, &mut current.iter())
-                },
-                DescriptorType::Interface => {
-                    self.add_interface(&mut device, &mut current.iter())
-                },
-                DescriptorType::Endpoint => {
-                    self.add_endpoint(&mut device, &mut current.iter())
-                }
-                _ => {
-                    println!("{}:{} FIXME DescriptorType {} {:02X?}", device.bus, device.address, kind, current);
-                    continue;
-                }
-            };
         }
         let bus_address = format!("{}-{}", device.bus, device.address).to_string();
         self.devices.insert(bus_address, device);
