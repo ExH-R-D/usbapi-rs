@@ -1,13 +1,11 @@
 use std::io;
+use std::io::BufReader;
 use std::fs::{self,DirEntry, File};
 use std::path::Path as Path;
-use std::io::prelude::*;
-use std::slice::Iter;
 use std::collections::HashMap;
 use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::descriptors::device::Device;
-use crate::descriptors::configuration::Configuration;
 use crate::descriptors::interface::Interface;
 use crate::descriptors::endpoint::Endpoint;
 use crate::descriptors::descriptor::{Descriptor, DescriptorType};
@@ -26,12 +24,12 @@ impl fmt::Display for UsbDevice {
 }
 
 impl UsbDevice {
-    fn new(bus: u8, address: u8, iter: &mut Iter<u8>) -> Option<Self> {
-        Some(UsbDevice {
+    fn new(bus: u8, address: u8, device: Device) -> Self {
+        UsbDevice {
             bus: bus,
             address: address,
-            device: Device::new(iter)?
-        })
+            device: device
+        }
     }
 }
 
@@ -68,7 +66,7 @@ impl UsbEnumerate {
 
     fn add_device(&mut self, file: &DirEntry, bus: u8, address: u8) {
         let file = File::open(file.path());
-        let mut file = match file {
+        let file = match file {
             Ok(file) => file,
             Err(e) => {
                 eprintln!("{}", e);
@@ -76,62 +74,49 @@ impl UsbEnumerate {
             }
         };
 
-        let mut desc = Descriptor::new(Vec::new());
-        file.read_to_end(&mut desc.descriptor).expect("Could not read Descriptor");
-        let device = desc.next().unwrap();
-        let mut device = UsbDevice::new(bus, address, &mut device.iter()).expect("Could not add DeviceDescriptor");
-        for current in desc {
-            // still unhappy with my implemention could probably be done better...
-            println!("{:?}", current);
-            if current.len() > 0 {
-                let kind = current[1];// as DescriptorType;
-                match DescriptorType::from(kind){
-                    DescriptorType::Configuration => {
-                        self.add_configuration(&mut device, &mut current.iter())
-                    },
-                    DescriptorType::Interface => {
-                        self.add_interface(&mut device, &mut current.iter())
-                    },
-                    DescriptorType::Endpoint => {
-                        self.add_endpoint(&mut device, &mut current.iter())
-                    }
-                    _ => {
-                        println!("{}:{} FIXME DescriptorType {} {:02X?}", device.bus, device.address, kind, current);
-                    }
-                };
+        let mut reader = BufReader::new(&file);
+        let mut descs = Descriptor::from_buf_reader(&mut reader);
+        let mut device: Option<UsbDevice> = None;
+        if let Some(kind) = descs.next() {
+            if let DescriptorType::Device(dev) = kind {
+                device = Some(UsbDevice::new(bus, address, dev));
             } else {
-                // BUG!!!!
-                break;
+                panic!("Could not enumerate device");
             }
+        }
+        let mut device = device.unwrap();
+        for kind in descs {
+            match kind {
+                DescriptorType::Configuration(conf) => {
+                    device.device.configurations.push(conf);
+                }
+                DescriptorType::Interface(iface) => {
+                    self.add_interface(&mut device, iface);
+                }
+                DescriptorType::Endpoint(endpoint) => {
+                    self.add_endpoint(&mut device, endpoint);
+                }
+                _ => {
+                    //self.add_unknown(&mut device, &mut desc.iter());
+                }
+            };
         }
         let bus_address = format!("{}-{}", device.bus, device.address).to_string();
         self.devices.insert(bus_address, device);
     }
 
-    fn add_configuration(&self, usb: &mut UsbDevice, iter_desc: &mut Iter<u8>) {
-        match Configuration::new(iter_desc) {
-            Some(conf) => usb.device.configurations.push(conf),
-            None => eprintln!("Could not parse Configuration descriptor {:02X?} for {}:{}", iter_desc, usb.bus, usb.address)
-        };
+    fn add_unknown(&self, usb: &mut UsbDevice, desc: &mut Vec<u8>) {
     }
 
-    fn add_interface(&self, usb: &mut UsbDevice, iter_desc: &mut Iter<u8>) {
+    fn add_interface(&self, usb: &mut UsbDevice, iface: Interface) {
         let configuration = usb.device.configurations.last_mut().unwrap();
-        match Interface::new(iter_desc) {
-            Some(iface) => configuration.interfaces.push(iface),
-            None => eprintln!("Could not parse Interface descriptor {:02X?} for {}:{}", iter_desc, usb.bus, usb.address)
-        };
+        configuration.interfaces.push(iface);
     }
 
-    fn add_endpoint(&self, usb: &mut UsbDevice, iter_desc: &mut Iter<u8>) {
+    fn add_endpoint(&self, usb: &mut UsbDevice, endpoint: Endpoint) {
         let configuration = usb.device.configurations.last_mut().unwrap();
         let endpoints = &mut configuration.interfaces.last_mut().unwrap().endpoints;
-        match Endpoint::new(iter_desc) {
-            Some(endpoint) => {
-                endpoints.push(endpoint);
-            },
-            None => eprintln!("Could not parse Endpoint descriptor {:02X?} for {}:{}", iter_desc, usb.bus, usb.address)
-        };
+        endpoints.push(endpoint);
     }
 
     pub fn devices(&self) -> &HashMap<String, UsbDevice> {
