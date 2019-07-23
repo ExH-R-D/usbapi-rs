@@ -82,6 +82,9 @@ impl UsbEnumerate {
         let mut device = UsbDevice::new(bus, address, &mut device.iter()).expect("Could not add DeviceDescriptor");
         for current in desc {
             // still unhappy with my implemention could probably be done better...
+            if current.len() == 0 {
+                continue;
+            }
             let kind = current[1];// as DescriptorType;
             match DescriptorType::from(kind){
                 DescriptorType::Configuration => {
