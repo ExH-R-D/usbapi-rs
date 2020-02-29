@@ -1,18 +1,17 @@
-use nix::*;
 use crate::os::linux::enumerate::UsbDevice;
-use std::ffi::CString;
-use std::fs::OpenOptions;
-use std::mem;
-use std::time::Duration;
-use std::os::unix::io::AsRawFd;
-use std::ptr;
-use mio::{Event, Ready, Poll, PollOpt, Token};
 use mio::event::Evented;
 use mio::unix::EventedFd;
-use std::io;
-use std::result::Result;
+use mio::{Poll, PollOpt, Ready, Token};
+use nix::*;
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::fmt;
+use std::fs::OpenOptions;
+use std::io;
+use std::mem;
+use std::os::unix::io::AsRawFd;
+use std::ptr;
+use std::result::Result;
 impl Evented for UsbFs {
     fn register(
         &self,
@@ -38,7 +37,6 @@ impl Evented for UsbFs {
         EventedFd(&self.handle.as_raw_fd()).deregister(poll)
     }
 }
-
 
 #[macro_export]
 macro_rules! ioctl_read_ptr {
@@ -118,18 +116,25 @@ pub struct ControlTransfer {
     index: u16,
     length: u16,
     timeout: u32,
-    data: *mut u8
+    data: *mut u8,
 }
 
 impl ControlTransfer {
-    pub fn new(request_type: u8, request: u8, value: u16, index: u16, mut data: Vec<u8>, timeout: u32) -> Self {
+    pub fn new(
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        mut data: Vec<u8>,
+        timeout: u32,
+    ) -> Self {
         ControlTransfer {
-            request_type: request_type,
-            request: request,
-            value: value,
-            index: index,
+            request_type,
+            request,
+            value,
+            index,
             length: data.capacity() as u16,
-            timeout: timeout,
+            timeout,
             data: data.as_mut_ptr(),
         }
     }
@@ -142,7 +147,7 @@ pub struct BulkTransfer {
     ep: u32,
     length: u32,
     timeout: u32,
-    data: *mut libc::c_void
+    data: *mut libc::c_void,
 }
 
 pub struct UsbFs {
@@ -178,13 +183,13 @@ pub struct UsbFsUrb {
     // UNION end...
     error_count: i32,
     signr: u32,
-    usercontext: *mut u8
+    usercontext: *mut u8,
 }
 
 impl UsbFsUrb {
     pub fn new(typ: u8, ep: u8, ptr: *mut u8, length: usize) -> Self {
         UsbFsUrb {
-            typ: typ,
+            typ,
             endpoint: ep,
             status: 0,
             flags: 0,
@@ -195,7 +200,7 @@ impl UsbFsUrb {
             stream_id: 0,
             error_count: 0,
             signr: 0,
-            usercontext: ptr
+            usercontext: ptr,
         }
     }
 
@@ -220,10 +225,6 @@ impl fmt::Display for UsbFsUrb {
     }
 }
 
-enum UsbError {
-    NotImplemeted
-}
-
 // EXPERIMENTAL FIXME error should not be nix::Error
 // Also it should be put in another file...
 pub trait UsbTransfer<T> {
@@ -233,7 +234,7 @@ pub trait UsbTransfer<T> {
 
 pub trait UsbCoreTransfer<T> {
     fn new_bulk(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
-   fn new_interrupt(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
+    fn new_interrupt(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
     fn new_isochronous(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
     // Fells akward need to rethink
 }
@@ -263,25 +264,21 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
         let ptr = self.mmap(size)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, size))
     }
-
 }
 
 impl UsbFs {
-   pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
+    pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
         let mut res = UsbFs {
-            handle: OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(format!(
-                    "/dev/bus/usb/{:03}/{:03}",
-                    device.bus, device.address
-                ))?,
+            handle: OpenOptions::new().read(true).write(true).open(format!(
+                "/dev/bus/usb/{:03}/{:03}",
+                device.bus, device.address
+            ))?,
             claims: vec![],
             capabilities: 0,
             urbs: HashMap::new(),
         };
 
-        res.capabilities();
+        res.capabilities().unwrap();
 
         Ok(res)
     }
@@ -316,7 +313,7 @@ impl UsbFs {
                 u.status = urb.status;
                 u.actual_length = urb.actual_length;
                 u
-            },
+            }
             None => {
                 eprintln!("EP: {} not exists in hashmap?", urb.endpoint);
                 UsbFsUrb::new(0xFF, urb.endpoint, ptr::null_mut(), 0)
@@ -347,7 +344,7 @@ impl UsbFs {
             disconnect.interface = interface as i32;
             // Disconnect driver
             disconnect.code = request_code_none!(b'U', 22) as i32;
-            let _res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
+            let _res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &disconnect) }?;
         }
 
         let _res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
@@ -412,7 +409,7 @@ impl UsbFs {
     fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32, nix::Error> {
         let bulk = BulkTransfer {
             ep: ep as u32,
-            length: length,
+            length,
             timeout: 10,
             data: mem,
         };
@@ -440,13 +437,23 @@ impl UsbFs {
 
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
         let vec = Vec::with_capacity(128);
-        match self.control(ControlTransfer::new(0x80, 0x06, 0x0300 | id as u16, 0, vec, 100)) {
+        match self.control(ControlTransfer::new(
+            0x80,
+            0x06,
+            0x0300 | id as u16,
+            0,
+            vec,
+            100,
+        )) {
             Ok(ctrl) => {
                 let utf = unsafe {
-                    std::slice::from_raw_parts(ctrl.data as *const u16, (ctrl.length/2) as usize)
+                    if ctrl.length % 2 != 0 {
+                        panic!("Alignment error {}", ctrl.length)
+                    }
+                    std::slice::from_raw_parts(ctrl.data as *const u16, (ctrl.length / 2) as usize)
                 };
-                return String::from_utf16_lossy(utf).to_string();
-            },
+                return String::from_utf16_lossy(utf);
+            }
             Err(e) => {
                 eprintln!("Control transfer failed {}", e);
             }
@@ -462,45 +469,45 @@ impl UsbFs {
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_SHARED,
                 self.handle.as_raw_fd(),
-                0 as libc::off_t)
-
+                0 as libc::off_t,
+            )
         } as *mut u8;
 
-        if ptr == ptr::null_mut() {
+        if ptr.is_null() {
             // if mmap fail we try malloc instead
-            ptr = unsafe { libc::calloc(1, length) as *mut u8};
-            if ptr == ptr::null_mut() {
+            ptr = unsafe { libc::calloc(1, length) as *mut u8 };
+            if ptr.is_null() {
                 return Err(nix::Error::Sys(nix::errno::Errno::ENOMEM));
             }
         }
         Ok(ptr)
     }
 
-/*
-    /// Setup a new bulk package for async send or recieve
-    /// * `ep` Endpoint
-    /// * `length` max length
-    /// * Returns UsbFsUrb with malloc'ed transfer buffer.
-    pub fn new_bulk(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
-        let ptr = self.mmap(length)?;
-        let mut urb = UsbFsUrb::new_bulk(ep, length)?;
-        urb.buffer = ptr as *mut libc::c_void
- ;
-        Ok(urb)
-    }
+    /*
+       /// Setup a new bulk package for async send or recieve
+       /// * `ep` Endpoint
+       /// * `length` max length
+       /// * Returns UsbFsUrb with malloc'ed transfer buffer.
+       pub fn new_bulk(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
+           let ptr = self.mmap(length)?;
+           let mut urb = UsbFsUrb::new_bulk(ep, length)?;
+           urb.buffer = ptr as *mut libc::c_void
+    ;
+           Ok(urb)
+       }
 
-    /// Untested
-    pub fn new_isochronous(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
-        let ptr = self.mmap(length)?;
-        Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, length))
-    }
+       /// Untested
+       pub fn new_isochronous(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
+           let ptr = self.mmap(length)?;
+           Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, length))
+       }
 
-    /// Untested
-    pub fn new_interrupt(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
-        let ptr = self.mmap(length)?;
-        Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, length))
-    }
-    */
+       /// Untested
+       pub fn new_interrupt(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
+           let ptr = self.mmap(length)?;
+           Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, length))
+       }
+       */
 
     /// Send a async transfer
     /// It is up to thbe enduser to poll the file descriptor for a result.

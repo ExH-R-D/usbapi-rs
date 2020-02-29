@@ -1,7 +1,7 @@
-use std::slice::Iter;
-use std::fmt;
 use crate::descriptors::interface::Interface;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::slice::Iter;
 #[derive(Serialize, Deserialize)]
 pub struct Configuration {
     length: u8,
@@ -12,21 +12,21 @@ pub struct Configuration {
     iconfiguration: u8,
     bmattributes: u8,
     max_power: u8,
-    pub interfaces: Vec<Interface>
+    pub interfaces: Vec<Interface>,
 }
 
 impl fmt::Display for Configuration {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = format!("bLength: {}\n", self.length);
-        d+=&format!("bDescriptorType: {}\n", self.kind);
-        d+=&format!("bTotalLength: {}\n", self.total_length);
-        d+=&format!("bNumInterfaces: {}\n", self.num_interfaces);
-        d+=&format!("bConfigurationValue: {}\n", self.configuration_value);
-        d+=&format!("iConfiguration: {}\n", self.iconfiguration);
-        d+=&format!("bmAttributes: 0x{:02x}\n", self.bmattributes);
-        d+=&format!("bMaxPower: {}\n", self.max_power);
+        d += &format!("bDescriptorType: {}\n", self.kind);
+        d += &format!("bTotalLength: {}\n", self.total_length);
+        d += &format!("bNumInterfaces: {}\n", self.num_interfaces);
+        d += &format!("bConfigurationValue: {}\n", self.configuration_value);
+        d += &format!("iConfiguration: {}\n", self.iconfiguration);
+        d += &format!("bmAttributes: 0x{:02x}\n", self.bmattributes);
+        d += &format!("bMaxPower: {}\n", self.max_power);
         for iface in &self.interfaces {
-            d+=&format!("{}", iface);
+            d += &format!("{}", iface);
         }
         write!(f, "{}", d)
     }
@@ -43,8 +43,7 @@ impl Configuration {
             iconfiguration: *iter.next()?,
             bmattributes: *iter.next()?,
             max_power: *iter.next()?,
-            interfaces: vec![]
+            interfaces: vec![],
         })
     }
 }
-

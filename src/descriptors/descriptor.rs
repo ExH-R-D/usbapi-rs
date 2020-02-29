@@ -1,11 +1,11 @@
-use std::io::Read;
-use std::io::BufReader;
-use super::device::Device;
 use super::configuration::Configuration;
-use super::interface::Interface;
+use super::device::Device;
 use super::endpoint::Endpoint;
+use super::interface::Interface;
+use std::io::BufReader;
+use std::io::Read;
 pub struct Descriptor {
-    pub descriptor: Vec<u8>
+    pub descriptor: Vec<u8>,
 }
 
 //#[derive(Debug)]
@@ -44,7 +44,7 @@ impl From<u8> for DescriptorType {
 impl Iterator for Descriptor {
     type Item = DescriptorType;
     fn next(&mut self) -> Option<DescriptorType> {
-        if self.descriptor.len() == 0 {
+        if self.descriptor.is_empty() {
             // We are done
             return None;
         }
@@ -60,20 +60,20 @@ impl Iterator for Descriptor {
         let res: DescriptorType = match kind {
             1 => DescriptorType::Device(Device::new(&mut iter)?),
             2 => DescriptorType::Configuration(Configuration::new(&mut iter)?),
-            3 => DescriptorType::String("FIXME".to_string()),
+            3 => DescriptorType::String("FIXME handle string type".to_string()),
             4 => DescriptorType::Interface(Interface::new(&mut iter)?),
             5 => DescriptorType::Endpoint(Endpoint::new(&mut iter)?),
-            _ => DescriptorType::Unknown(self.descriptor[..dlength].to_vec())
+            _ => DescriptorType::Unknown(self.descriptor[..dlength].to_vec()),
         };
         self.descriptor = self.descriptor[dlength..].to_vec();
-        
+
         Some(res)
     }
 }
 
 impl Descriptor {
     pub fn from_buf_reader(reader: &mut BufReader<&std::fs::File>) -> Self {
-        let mut desc = Descriptor { descriptor: vec!() };
+        let mut desc = Descriptor { descriptor: vec![] };
         if let Err(err) = reader.read_to_end(&mut desc.descriptor) {
             println!("{}", err);
         }
@@ -81,4 +81,3 @@ impl Descriptor {
         desc
     }
 }
-

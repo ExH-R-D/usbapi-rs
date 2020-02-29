@@ -1,20 +1,20 @@
-use std::io;
-use std::io::BufReader;
-use std::fs::{self,DirEntry, File};
-use std::path::Path as Path;
+use crate::descriptors::descriptor::{Descriptor, DescriptorType};
+use crate::descriptors::device::Device;
+use crate::descriptors::endpoint::Endpoint;
+use crate::descriptors::interface::Interface;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use serde::{Deserialize, Serialize};
-use crate::descriptors::device::Device;
-use crate::descriptors::interface::Interface;
-use crate::descriptors::endpoint::Endpoint;
-use crate::descriptors::descriptor::{Descriptor, DescriptorType};
+use std::fs::{self, DirEntry, File};
+use std::io;
+use std::io::BufReader;
+use std::path::Path;
 
 #[derive(Serialize, Deserialize)]
 pub struct UsbDevice {
     pub bus: u8,
     pub address: u8,
-    pub device: Device
+    pub device: Device,
 }
 
 impl fmt::Display for UsbDevice {
@@ -26,20 +26,21 @@ impl fmt::Display for UsbDevice {
 impl UsbDevice {
     fn new(bus: u8, address: u8, device: Device) -> Self {
         UsbDevice {
-            bus: bus,
-            address: address,
-            device: device
+            bus,
+            address,
+            device,
         }
     }
 }
 
+#[derive(Default)]
 pub struct UsbEnumerate {
     pub devices: HashMap<String, UsbDevice>,
 }
 
 impl UsbEnumerate {
     pub fn new() -> Self {
-        UsbEnumerate { devices: HashMap::new()}
+        Self::default()
     }
 
     pub fn enumerate(&mut self) -> io::Result<()> {
@@ -50,14 +51,29 @@ impl UsbEnumerate {
         for entry in fs::read_dir(dir).expect("Can't acces usbpath?") {
             let entry = match entry {
                 Ok(e) => e,
-                Err(e) => { eprintln!("{}", e); continue; },
+                Err(e) => {
+                    eprintln!("{}", e);
+                    continue;
+                }
             };
             let path = entry.path();
             if path.is_dir() {
                 self.read_dir(&path)?;
             } else {
-                let bus: u8 = path.parent().unwrap().file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is broken could not parse bus as u8");
-                let address: u8 = path.file_name().unwrap().to_string_lossy().parse::<u8>().expect("Something is smoking could not parse address from dirname {}");
+                let bus: u8 = path
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .parse::<u8>()
+                    .expect("Something is broken could not parse bus as u8");
+                let address: u8 = path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .parse::<u8>()
+                    .expect("Something is smoking could not parse address from dirname {}");
                 self.add_device(&entry, bus, address);
             }
         }
@@ -70,7 +86,7 @@ impl UsbEnumerate {
             Ok(file) => file,
             Err(e) => {
                 eprintln!("{}", e);
-                return ;
+                return;
             }
         };
 
@@ -93,6 +109,9 @@ impl UsbEnumerate {
                 DescriptorType::Interface(iface) => {
                     self.add_interface(&mut device, iface);
                 }
+                DescriptorType::String(text) => {
+                    println!("{}", text);
+                }
                 DescriptorType::Endpoint(endpoint) => {
                     self.add_endpoint(&mut device, endpoint);
                 }
@@ -101,11 +120,8 @@ impl UsbEnumerate {
                 }
             };
         }
-        let bus_address = format!("{}-{}", device.bus, device.address).to_string();
+        let bus_address = format!("{}-{}", device.bus, device.address);
         self.devices.insert(bus_address, device);
-    }
-
-    fn add_unknown(&self, usb: &mut UsbDevice, desc: &mut Vec<u8>) {
     }
 
     fn add_interface(&self, usb: &mut UsbDevice, iface: Interface) {
@@ -120,12 +136,10 @@ impl UsbEnumerate {
     }
 
     pub fn devices(&self) -> &HashMap<String, UsbDevice> {
-        return &self.devices;
+        &self.devices
     }
 
     pub fn get_device_from_bus(&self, bus: u8, address: u8) -> Option<&UsbDevice> {
-        let bus_address = format!("{}-{}", bus, address).to_string();
-        self.devices.get(&bus_address)
+        self.devices.get(&format!("{}-{}", bus, address))
     }
 }
-

@@ -1,9 +1,9 @@
-use usbapi::*;
-use mio::{Events,Ready, Poll, PollOpt, Token, Evented};
+use mio::{Evented, Events, Poll, PollOpt, Ready, Token};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use usbapi::*;
 fn main() -> Result<(), std::io::Error> {
     let term = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGQUIT, Arc::clone(&term)).unwrap();
@@ -21,11 +21,20 @@ fn main() -> Result<(), std::io::Error> {
 
             println!("Capabilities: 0x{:02X?}", usb.capabilities());
             usb.claim_interface(0).is_ok();
-            println!("Manufacturer: {}", usb.get_descriptor_string(device.device.imanufacturer));
-            println!("Product: {}", usb.get_descriptor_string(device.device.iproduct));
-            println!("Serial: {}", usb.get_descriptor_string(device.device.iserial_number));
+            println!(
+                "Manufacturer: {}",
+                usb.get_descriptor_string(device.device.imanufacturer)
+            );
+            println!(
+                "Product: {}",
+                usb.get_descriptor_string(device.device.iproduct)
+            );
+            println!(
+                "Serial: {}",
+                usb.get_descriptor_string(device.device.iserial_number)
+            );
             usb.claim_interface(1).is_ok();
-            match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, vec!(), 100)) {
+            match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, vec![], 100)) {
                 Ok(_) => {}
                 Err(err) => println!("Send bytes to control failed {}", err),
             };
@@ -59,7 +68,8 @@ fn main() -> Result<(), std::io::Error> {
             let mut events = Events::with_capacity(16);
             let mut run = true;
             while run {
-                poll.poll(&mut events, Some(Duration::from_millis(100))).unwrap_or(0);
+                poll.poll(&mut events, Some(Duration::from_millis(100)))
+                    .unwrap_or(0);
                 for e in &events {
                     println!("eventif: {:?}", e);
                     let urb = usb.async_response().unwrap();
@@ -73,7 +83,7 @@ fn main() -> Result<(), std::io::Error> {
                 if term.load(Ordering::Relaxed) {
                     break;
                 }
-//                thread::sleep(Duration::from_millis(100));
+                //                thread::sleep(Duration::from_millis(100));
             }
             loop {
                 poll.poll(&mut events, Some(Duration::from_millis(100)))?;
@@ -84,7 +94,7 @@ fn main() -> Result<(), std::io::Error> {
                     println!("got string: {}", String::from_utf8_lossy(&slice));
                     let rxurb = usb.new_bulk(0x81, 64).unwrap();
                     usb.async_transfer(rxurb).unwrap_or(0);
-                 }
+                }
                 if term.load(Ordering::Relaxed) {
                     break;
                 }

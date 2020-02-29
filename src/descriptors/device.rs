@@ -1,8 +1,8 @@
-use std::slice::Iter;
-use std::fmt;
 use crate::descriptors::configuration::Configuration;
 use serde::{Deserialize, Serialize};
 use serde_hex::{SerHex, StrictPfx};
+use std::fmt;
+use std::slice::Iter;
 use toml;
 
 #[derive(Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub struct Device {
     pub iproduct: u8,
     pub iserial_number: u8,
     pub num_configurations: u8,
-    pub configurations: Vec<Configuration>
+    pub configurations: Vec<Configuration>,
 }
 
 impl fmt::Display for Device {
@@ -52,8 +52,7 @@ impl Device {
             iproduct: *iter.next()?,
             iserial_number: *iter.next()?,
             num_configurations: *iter.next()?,
-            configurations: vec![]
+            configurations: vec![],
         })
     }
 }
-
