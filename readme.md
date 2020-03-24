@@ -4,8 +4,6 @@ User space driver for Rust in Linux.
 
 Hopefully can replace libusb-rs C binding in the future.
 
-I am very new to RUST so this project will probably be rewritten several times....
-
 You are free to fork or send pull request and ideas...
 
 ## Supported functions
