@@ -1,8 +1,8 @@
-# USBAPI for RUST
+# Native USB API for Rust
 
-User space driver for Rust in Linux.
+This does *not* depend on libusb and is a raw implementation in rust.
 
-Hopefully can replace libusb-rs C binding in the future.
+Only Linux is supported atm.
 
 You are free to fork or send pull request and ideas...
 
