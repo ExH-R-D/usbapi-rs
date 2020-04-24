@@ -4,6 +4,7 @@ use super::endpoint::Endpoint;
 use super::interface::Interface;
 use std::io::BufReader;
 use std::io::Read;
+#[derive(Debug)]
 pub struct Descriptor {
     pub descriptor: Vec<u8>,
 }
@@ -63,7 +64,14 @@ impl Iterator for Descriptor {
             3 => DescriptorType::String("FIXME handle string type".to_string()),
             4 => DescriptorType::Interface(Interface::new(&mut iter)?),
             5 => DescriptorType::Endpoint(Endpoint::new(&mut iter)?),
-            _ => DescriptorType::Unknown(self.descriptor[..dlength].to_vec()),
+            _ => {
+                eprintln!("Found unknown descriptor: {} {}", kind, dlength);
+                let res = DescriptorType::Unknown(self.descriptor[..dlength].to_vec());
+                //                if dlength == 0 {
+                self.descriptor = vec![];
+                //               }
+                return Some(res);
+            }
         };
         self.descriptor = self.descriptor[dlength..].to_vec();
 
@@ -79,5 +87,27 @@ impl Descriptor {
         }
 
         desc
+    }
+
+    /// FIXME uglyish hackish
+    pub fn from_file(file_path: &std::path::Path) -> Option<Self> {
+        use std::fs::File;
+        use std::io::prelude::*;
+        let file = match File::open(file_path) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("{}", e);
+                return None;
+            }
+        };
+        println!("{:?}", file_path);
+
+        let mut desc = Descriptor { descriptor: vec![] };
+        for byte in file.bytes() {
+            desc.descriptor.push(byte.unwrap());
+        }
+
+        println!("{:X?}", desc);
+        Some(desc)
     }
 }

@@ -1,5 +1,4 @@
 use mio::{Evented, Events, Poll, PollOpt, Ready, Token};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,14 +12,14 @@ fn main() -> Result<(), std::io::Error> {
     let mut usb = UsbEnumerate::new();
     usb.enumerate().expect("Could not find /dev/bus/usb are you running windows or maybe freebsd or mac or... whatever feel free to add a patch :)");
 
-    for (bus_address, device) in usb.devices() {
+    for (_bus_address, device) in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
             let mut usb = UsbCore::from_device(&device).expect("Could not open device");
             let poll = Poll::new().unwrap();
             usb.register(&poll, Token(0), Ready::writable(), PollOpt::edge())?;
 
             println!("Capabilities: 0x{:02X?}", usb.capabilities());
-            usb.claim_interface(0).is_ok();
+            let _ = usb.claim_interface(0).is_ok();
             println!(
                 "Manufacturer: {}",
                 usb.get_descriptor_string(device.device.imanufacturer)
@@ -33,7 +32,7 @@ fn main() -> Result<(), std::io::Error> {
                 "Serial: {}",
                 usb.get_descriptor_string(device.device.iserial_number)
             );
-            usb.claim_interface(1).is_ok();
+            let _ = usb.claim_interface(1).is_ok();
             match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, vec![], 100)) {
                 Ok(_) => {}
                 Err(err) => println!("Send bytes to control failed {}", err),

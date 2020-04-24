@@ -5,9 +5,8 @@ use crate::descriptors::interface::Interface;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::{self, DirEntry, File};
+use std::fs::{self, DirEntry};
 use std::io;
-use std::io::BufReader;
 use std::path::Path;
 
 #[derive(Serialize, Deserialize)]
@@ -44,6 +43,7 @@ impl UsbEnumerate {
     }
 
     pub fn enumerate(&mut self) -> io::Result<()> {
+        println!("readdir");
         self.read_dir(Path::new("/dev/bus/usb/"))
     }
 
@@ -81,47 +81,38 @@ impl UsbEnumerate {
     }
 
     fn add_device(&mut self, file: &DirEntry, bus: u8, address: u8) {
-        let file = File::open(file.path());
-        let file = match file {
-            Ok(file) => file,
-            Err(e) => {
-                eprintln!("{}", e);
-                return;
+        if let Some(mut descs) = Descriptor::from_file(&file.path()) {
+            let mut device: Option<UsbDevice> = None;
+            if let Some(kind) = descs.next() {
+                if let DescriptorType::Device(dev) = kind {
+                    device = Some(UsbDevice::new(bus, address, dev));
+                } else {
+                    panic!("Could not enumerate device");
+                }
             }
-        };
-
-        let mut reader = BufReader::new(&file);
-        let mut descs = Descriptor::from_buf_reader(&mut reader);
-        let mut device: Option<UsbDevice> = None;
-        if let Some(kind) = descs.next() {
-            if let DescriptorType::Device(dev) = kind {
-                device = Some(UsbDevice::new(bus, address, dev));
-            } else {
-                panic!("Could not enumerate device");
+            let mut device = device.unwrap();
+            for kind in descs {
+                match kind {
+                    DescriptorType::Configuration(conf) => {
+                        device.device.configurations.push(conf);
+                    }
+                    DescriptorType::Interface(iface) => {
+                        self.add_interface(&mut device, iface);
+                    }
+                    DescriptorType::String(text) => {
+                        println!("{}", text);
+                    }
+                    DescriptorType::Endpoint(endpoint) => {
+                        self.add_endpoint(&mut device, endpoint);
+                    }
+                    _ => {
+                        //self.add_unknown(&mut device, &mut desc.iter());
+                    }
+                };
             }
+            let bus_address = format!("{}-{}", device.bus, device.address);
+            self.devices.insert(bus_address, device);
         }
-        let mut device = device.unwrap();
-        for kind in descs {
-            match kind {
-                DescriptorType::Configuration(conf) => {
-                    device.device.configurations.push(conf);
-                }
-                DescriptorType::Interface(iface) => {
-                    self.add_interface(&mut device, iface);
-                }
-                DescriptorType::String(text) => {
-                    println!("{}", text);
-                }
-                DescriptorType::Endpoint(endpoint) => {
-                    self.add_endpoint(&mut device, endpoint);
-                }
-                _ => {
-                    //self.add_unknown(&mut device, &mut desc.iter());
-                }
-            };
-        }
-        let bus_address = format!("{}-{}", device.bus, device.address);
-        self.devices.insert(bus_address, device);
     }
 
     fn add_interface(&self, usb: &mut UsbDevice, iface: Interface) {

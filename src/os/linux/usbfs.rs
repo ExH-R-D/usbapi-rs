@@ -62,23 +62,36 @@ macro_rules! ioctl_readwrite_ptr {
     )
 }
 
+#[allow(dead_code)]
 const USBFS_CAP_ZERO_PACKET: u8 = 0x01;
+#[allow(dead_code)]
 const USBFS_CAP_BULK_CONTINUATION: u8 = 0x02;
+#[allow(dead_code)]
 const USBFS_CAP_NO_PACKET_SIZE_LIM: u8 = 0x04;
+#[allow(dead_code)]
 const USBFS_CAP_BULK_SCATTER_GATHER: u8 = 0x08;
+#[allow(dead_code)]
 const USBFS_CAP_REAP_AFTER_DISCONNECT: u8 = 0x10;
+#[allow(dead_code)]
 const USBFS_CAP_MMAP: u8 = 0x20;
+#[allow(dead_code)]
 const USBFS_CAP_DROP_PRIVILEGES: u8 = 0x40;
 
 const USBFS_URB_TYPE_ISO: u8 = 0;
 const USBFS_URB_TYPE_INTERRUPT: u8 = 1;
+#[allow(dead_code)]
 const USBFS_URB_TYPE_CONTROL: u8 = 2;
 const USBFS_URB_TYPE_BULK: u8 = 3;
 
+#[allow(dead_code)]
 const USBFS_URB_FLAGS_SHORT_NOT_OK: u32 = 0x01;
+#[allow(dead_code)]
 const USBFS_URB_FLAGS_ISO_ASAP: u32 = 0x02;
+#[allow(dead_code)]
 const USBFS_URB_FLAGS_BULK_CONTINUATION: u32 = 0x04;
+#[allow(dead_code)]
 const USBFS_URB_FLAGS_ZERO_PACKET: u32 = 0x40;
+#[allow(dead_code)]
 const USBFS_URB_FLAGS_NO_INTERRUPT: u32 = 0x80;
 
 #[repr(C)]
@@ -268,11 +281,15 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
 
 impl UsbFs {
     pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
+        UsbFs::from_bus_address(device.bus, device.address)
+    }
+
+    pub fn from_bus_address(bus: u8, address: u8) -> Result<UsbFs, io::Error> {
         let mut res = UsbFs {
-            handle: OpenOptions::new().read(true).write(true).open(format!(
-                "/dev/bus/usb/{:03}/{:03}",
-                device.bus, device.address
-            ))?,
+            handle: OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(format!("/dev/bus/usb/{:03}/{:03}", bus, address))?,
             claims: vec![],
             capabilities: 0,
             urbs: HashMap::new(),
@@ -307,6 +324,7 @@ impl UsbFs {
             usb_reapurbndelay(self.handle.as_raw_fd(), &urb)?;
             &*urb
         };
+        #[allow(clippy::forget_ref)]
         std::mem::forget(urb);
         let surb = match self.urbs.remove(&urb.endpoint) {
             Some(mut u) => {
@@ -381,11 +399,14 @@ impl UsbFs {
     ///
     pub fn control(&self, mut ctrl: ControlTransfer) -> Result<ControlTransfer, nix::Error> {
         let len = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &ctrl) }?;
+        if len < 0 {
+            return Err(nix::Error::last());
+        }
         ctrl.length = len as u16;
         Ok(ctrl)
     }
 
-    /// Syncrone bulk read
+    /// Blocked bulk read
     /// Consider use @async_transfer() instead.
     pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32, nix::Error> {
         self.bulk(
@@ -395,10 +416,9 @@ impl UsbFs {
         )
     }
 
-    /// Syncrone bulk write
+    /// Blocked bulk write
     /// consider use @async_transfer() instead
     pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> Result<u32, nix::Error> {
-        // TODO error if ep highest is set eg BULK_READ?
         self.bulk(
             ep & 0x7F,
             mem.as_ptr() as *mut libc::c_void,
@@ -414,27 +434,16 @@ impl UsbFs {
             data: mem,
         };
 
-        let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &bulk) };
-        match res {
-            Ok(len) => {
-                if len >= 0 {
-                    return Ok(len as u32);
-                } else {
-                    println!(
-                        "Bulk endpoint: {:02X}, error cause {:?} FIXME return Err",
-                        ep, res
-                    );
-                    return Ok(0);
-                }
-            }
-            Err(res) => {
-                println!("Bulk endpoint: {:02X} error cause {:?}", ep, res);
-            }
+        let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &bulk) }?;
+        // Note! ioctl return -1 on IO error...
+        if res < 0 {
+            eprintln!("Bulk endpoint: {:02X} error cause {:?}", ep, res);
+            return Err(nix::Error::last());
         }
-
-        Ok(0)
+        Ok(res as u32)
     }
 
+    #[allow(clippy::cast_ptr_alignment)]
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
         let vec = Vec::with_capacity(128);
         match self.control(ControlTransfer::new(
@@ -448,17 +457,21 @@ impl UsbFs {
             Ok(ctrl) => {
                 let utf = unsafe {
                     if ctrl.length % 2 != 0 {
-                        panic!("Alignment error {}", ctrl.length)
+                        eprintln!(
+                            "Alignment {} error invalid UTF16 ignored string id {}",
+                            ctrl.length, id
+                        );
+                        return "Invalid UTF16".to_string();
                     }
                     std::slice::from_raw_parts(ctrl.data as *const u16, (ctrl.length / 2) as usize)
                 };
-                return String::from_utf16_lossy(utf);
+                String::from_utf16_lossy(utf)
             }
             Err(e) => {
-                eprintln!("Control transfer failed {}", e);
+                eprintln!("get_descriptor_string failed with {} for {}", e, id);
+                "".to_string()
             }
         }
-        "".to_string()
     }
 
     fn mmap(&mut self, length: usize) -> Result<*mut u8, Error> {
