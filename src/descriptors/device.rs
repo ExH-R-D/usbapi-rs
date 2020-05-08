@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_hex::{SerHex, StrictPfx};
 use std::fmt;
 use std::slice::Iter;
-use toml;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Device {
     pub length: u8,
     pub kind: u8,
@@ -30,8 +29,7 @@ pub struct Device {
 
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let d = toml::to_string(self);
-        write!(f, "{}", d.unwrap())
+        write!(f, "{:?}", self)
     }
 }
 
