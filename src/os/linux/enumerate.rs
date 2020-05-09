@@ -43,7 +43,6 @@ impl UsbEnumerate {
     }
 
     pub fn enumerate(&mut self) -> io::Result<()> {
-        println!("readdir");
         self.read_dir(Path::new("/dev/bus/usb/"))
     }
 
@@ -100,7 +99,7 @@ impl UsbEnumerate {
                         self.add_interface(&mut device, iface);
                     }
                     DescriptorType::String(text) => {
-                        println!("{}", text);
+                        //println!("{}", text);
                     }
                     DescriptorType::Endpoint(endpoint) => {
                         self.add_endpoint(&mut device, endpoint);
