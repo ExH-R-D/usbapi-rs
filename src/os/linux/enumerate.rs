@@ -47,7 +47,7 @@ impl UsbEnumerate {
     }
 
     fn read_dir(&mut self, dir: &Path) -> io::Result<()> {
-        for entry in fs::read_dir(dir).expect("Can't acces usbpath?") {
+        for entry in fs::read_dir(dir).expect("Can't access usbpath?") {
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {

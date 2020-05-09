@@ -100,14 +100,12 @@ impl Descriptor {
                 return None;
             }
         };
-        println!("{:?}", file_path);
 
         let mut desc = Descriptor { descriptor: vec![] };
         for byte in file.bytes() {
             desc.descriptor.push(byte.unwrap());
         }
 
-        println!("{:X?}", desc);
         Some(desc)
     }
 }
