@@ -98,9 +98,7 @@ impl UsbEnumerate {
                     DescriptorType::Interface(iface) => {
                         self.add_interface(&mut device, iface);
                     }
-                    DescriptorType::String(text) => {
-                        //println!("{}", text);
-                    }
+                    DescriptorType::String(_) => {}
                     DescriptorType::Endpoint(endpoint) => {
                         self.add_endpoint(&mut device, endpoint);
                     }
