@@ -55,7 +55,7 @@ macro_rules! ioctl_readwrite_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
         $(#[$attr])*
             pub unsafe fn $name(fd: $crate::libc::c_int,
-                                data: *const $ty)
+                                data: *mut $ty)
                                 -> $crate::Result<$crate::libc::c_int> {
                                     convert_ioctl_res!($crate::libc::ioctl(fd, request_code_readwrite!($ioty, $nr, ::std::mem::size_of::<$ty>()) as $crate::sys::ioctl::ioctl_num_type, data))
             }
@@ -94,6 +94,28 @@ const USBFS_URB_FLAGS_ZERO_PACKET: u32 = 0x40;
 #[allow(dead_code)]
 const USBFS_URB_FLAGS_NO_INTERRUPT: u32 = 0x80;
 
+#[allow(dead_code)]
+pub const RECIPIENT_DEVICE: u8 = 0x00;
+#[allow(dead_code)]
+pub const RECIPIENT_INTERFACE: u8 = 0x01;
+#[allow(dead_code)]
+pub const RECIPIENT_ENDPOINT: u8 = 0x02;
+#[allow(dead_code)]
+pub const RECIPIENT_OTHER: u8 = 0x03;
+#[allow(dead_code)]
+pub const REQUEST_TYPE_STANDARD: u8 = 0x00 << 5;
+#[allow(dead_code)]
+pub const REQUEST_TYPE_CLASS: u8 = 0x01 << 5;
+#[allow(dead_code)]
+pub const ENDPOINT_IN: u8 = 0x80;
+#[allow(dead_code)]
+pub const ENDPOINT_OUT: u8 = 0x00;
+
+enum RequestType {
+    EndpointIN,
+    RequestTypeClass,
+}
+
 #[repr(C)]
 pub struct UsbFsIsoPacketSize {
     length: u32,
@@ -122,6 +144,7 @@ union UrbUnion {
 }
 
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct ControlTransfer {
     request_type: u8,
     request: u8,
@@ -129,7 +152,7 @@ pub struct ControlTransfer {
     index: u16,
     length: u16,
     timeout: u32,
-    data: *mut u8,
+    pub data: *mut u8,
 }
 
 impl ControlTransfer {
@@ -141,15 +164,35 @@ impl ControlTransfer {
         mut data: Vec<u8>,
         timeout: u32,
     ) -> Self {
+        let length = data.capacity() as u16;
         ControlTransfer {
             request_type,
             request,
             value,
             index,
-            length: data.capacity() as u16,
+            length,
             timeout,
             data: data.as_mut_ptr(),
         }
+    }
+
+    pub fn no_data(request_type: u8, request: u8, value: u16, index: u16, timeout: u32) -> Self {
+        ControlTransfer {
+            request_type,
+            request,
+            value,
+            index,
+            length: 0,
+            timeout,
+            data: ptr::null_mut(),
+        }
+    }
+
+    pub fn get_slice<'a>(&self) -> &'a [u8] {
+        if self.length == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts_mut(self.data, self.length as usize) }
     }
 }
 
@@ -324,8 +367,6 @@ impl UsbFs {
             usb_reapurbndelay(self.handle.as_raw_fd(), &urb)?;
             &*urb
         };
-        #[allow(clippy::forget_ref)]
-        std::mem::forget(urb);
         let surb = match self.urbs.remove(&urb.endpoint) {
             Some(mut u) => {
                 u.status = urb.status;
@@ -362,7 +403,7 @@ impl UsbFs {
             disconnect.interface = interface as i32;
             // Disconnect driver
             disconnect.code = request_code_none!(b'U', 22) as i32;
-            let _res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &disconnect) }?;
+            let _res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
         }
 
         let _res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
@@ -397,13 +438,17 @@ impl UsbFs {
     /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, vec!(), 100);
     /// ```
     ///
-    pub fn control(&self, mut ctrl: ControlTransfer) -> Result<ControlTransfer, nix::Error> {
-        let len = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &ctrl) }?;
+    pub fn control(&self, mut ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
+        let len = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &mut ctrl) }?;
         if len < 0 {
             return Err(nix::Error::last());
         }
         ctrl.length = len as u16;
-        Ok(ctrl)
+        let mut res = Vec::new();
+        for d in ctrl.get_slice() {
+            res.push(*d);
+        }
+        Ok(res)
     }
 
     /// Blocked bulk read
@@ -427,14 +472,14 @@ impl UsbFs {
     }
 
     fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32, nix::Error> {
-        let bulk = BulkTransfer {
+        let mut bulk = BulkTransfer {
             ep: ep as u32,
             length,
             timeout: 10,
             data: mem,
         };
 
-        let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &bulk) }?;
+        let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &mut bulk) }?;
         // Note! ioctl return -1 on IO error...
         if res < 0 {
             eprintln!("Bulk endpoint: {:02X} error cause {:?}", ep, res);
@@ -445,7 +490,7 @@ impl UsbFs {
 
     #[allow(clippy::cast_ptr_alignment)]
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
-        let vec = Vec::with_capacity(128);
+        let vec = Vec::with_capacity(64);
         match self.control(ControlTransfer::new(
             0x80,
             0x06,
@@ -454,17 +499,18 @@ impl UsbFs {
             vec,
             100,
         )) {
-            Ok(ctrl) => {
-                let utf = unsafe {
-                    if ctrl.length % 2 != 0 {
-                        eprintln!(
-                            "Alignment {} error invalid UTF16 ignored string id {}",
-                            ctrl.length, id
-                        );
-                        return "Invalid UTF16".to_string();
-                    }
-                    std::slice::from_raw_parts(ctrl.data as *const u16, (ctrl.length / 2) as usize)
-                };
+            Ok(data) => {
+                let mut length = data.len();
+                if length % 2 != 0 || length == 0 {
+                    eprintln!(
+                        "Alignment {} error invalid UTF-16 ignored string id {}",
+                        length, id
+                    );
+                    return "Invalid UTF-16".into();
+                }
+                length /= 2;
+                let utf =
+                    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u16, length) };
                 String::from_utf16_lossy(utf)
             }
             Err(e) => {
