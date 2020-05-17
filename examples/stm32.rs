@@ -33,7 +33,7 @@ fn main() -> Result<(), std::io::Error> {
                 usb.get_descriptor_string(device.device.iserial_number)
             );
             let _ = usb.claim_interface(1).is_ok();
-            match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, vec![], 100)) {
+            match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, None, 100)) {
                 Ok(_) => {}
                 Err(err) => println!("Send bytes to control failed {}", err),
             };

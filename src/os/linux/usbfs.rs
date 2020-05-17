@@ -161,10 +161,21 @@ impl ControlTransfer {
         request: u8,
         value: u16,
         index: u16,
-        mut data: Vec<u8>,
+        buf: Option<Vec<u8>>,
         timeout: u32,
     ) -> Self {
-        let length = data.capacity() as u16;
+        let length;
+        let data;
+        if let Some(buf) = buf {
+            length = buf.len() as u16;
+            let mut buf = std::mem::ManuallyDrop::new(buf);
+            data = buf.as_mut_ptr();
+        //       println!("DATA {:X?}", &data);
+        } else {
+            length = 0;
+            data = ptr::null_mut();
+        }
+
         ControlTransfer {
             request_type,
             request,
@@ -172,27 +183,16 @@ impl ControlTransfer {
             index,
             length,
             timeout,
-            data: data.as_mut_ptr(),
+            data,
         }
     }
 
-    pub fn no_data(request_type: u8, request: u8, value: u16, index: u16, timeout: u32) -> Self {
-        ControlTransfer {
-            request_type,
-            request,
-            value,
-            index,
-            length: 0,
-            timeout,
-            data: ptr::null_mut(),
-        }
-    }
-
-    pub fn get_slice<'a>(&self) -> &'a [u8] {
-        if self.length == 0 {
+    pub fn get_slice<'a>(self) -> &'a [u8] {
+        if self.length == 0 || self.data.is_null() {
             return &[];
         }
-        unsafe { std::slice::from_raw_parts_mut(self.data, self.length as usize) }
+        let s = unsafe { std::slice::from_raw_parts_mut(self.data, self.length as usize) };
+        s
     }
 }
 
@@ -395,18 +395,19 @@ impl UsbFs {
     ///
     pub fn claim_interface(&mut self, interface: u32) -> Result<(), nix::Error> {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
-        let _res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
-        let driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
-        let driver_name = driver_name.to_str().unwrap_or("");
-        if driver_name != "usbfs" {
-            let mut disconnect: UsbFsIoctl = unsafe { mem::zeroed() };
-            disconnect.interface = interface as i32;
-            // Disconnect driver
-            disconnect.code = request_code_none!(b'U', 22) as i32;
-            let _res = unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
+        let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
+        if res.is_ok() {
+            let driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
+            let driver_name = driver_name.to_str().unwrap_or("");
+            if driver_name != "usbfs" {
+                let mut disconnect: UsbFsIoctl = unsafe { mem::zeroed() };
+                disconnect.interface = interface as i32;
+                // Disconnect driver
+                disconnect.code = request_code_none!(b'U', 22) as i32;
+                unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
+            }
         }
-
-        let _res = unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
+        unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
         self.claims.push(interface);
         Ok(())
     }
@@ -435,16 +436,17 @@ impl UsbFs {
     ///
     /// Basic usage:
     /// ```
-    /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, vec!(), 100);
+    /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, None, 1000);
     /// ```
     ///
     pub fn control(&self, mut ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
         let len = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &mut ctrl) }?;
+        println!("res {}", len);
         if len < 0 {
             return Err(nix::Error::last());
         }
-        ctrl.length = len as u16;
         let mut res = Vec::new();
+        ctrl.length = len as u16;
         for d in ctrl.get_slice() {
             res.push(*d);
         }
@@ -490,13 +492,13 @@ impl UsbFs {
 
     #[allow(clippy::cast_ptr_alignment)]
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
-        let vec = Vec::with_capacity(64);
+        let vec = vec![0 as u8; 64];
         match self.control(ControlTransfer::new(
             0x80,
             0x06,
             0x0300 | id as u16,
             0,
-            vec,
+            Some(vec),
             100,
         )) {
             Ok(data) => {
