@@ -130,6 +130,12 @@ pub struct UsbFsGetDriver {
 }
 
 #[repr(C)]
+pub struct UsbFsSetInterface {
+    interface: u32,
+    alt_setting: u32,
+}
+
+#[repr(C)]
 pub struct UsbFsIoctl {
     interface: i32,
     code: i32,
@@ -215,6 +221,7 @@ pub struct UsbFs {
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
 ioctl_readwrite_ptr!(usb_bulk_transfer, b'U', 2, BulkTransfer);
+ioctl_read_ptr!(usb_set_interface, b'U', 4, UsbFsSetInterface);
 ioctl_write_ptr!(usb_get_driver, b'U', 8, UsbFsGetDriver);
 ioctl_read_ptr!(usb_submit_urb, b'U', 10, UsbFsUrb);
 ioctl_write_ptr!(usb_reapurbndelay, b'U', 13, *mut UsbFsUrb);
@@ -412,6 +419,15 @@ impl UsbFs {
         Ok(())
     }
 
+    pub fn set_interface(&mut self, interface: u32, alt_setting: u32) -> Result<(), nix::Error> {
+        let setter = UsbFsSetInterface {
+            interface,
+            alt_setting,
+        };
+        unsafe { usb_set_interface(self.handle.as_raw_fd(), &setter) }?;
+        Ok(())
+    }
+
     /// Release interface
     ///
     /// * the `interface` number to claim
@@ -490,7 +506,7 @@ impl UsbFs {
         Ok(res as u32)
     }
 
-    #[allow(clippy::cast_ptr_alignment)]
+    //    #[allow(clippy::cast_ptr_alignment)]
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
         let vec = vec![0 as u8; 64];
         match self.control(ControlTransfer::new(
@@ -498,6 +514,37 @@ impl UsbFs {
             0x06,
             0x0300 | id as u16,
             0,
+            Some(vec),
+            100,
+        )) {
+            Ok(data) => {
+                let mut length = data.len();
+                if length % 2 != 0 || length == 0 {
+                    eprintln!(
+                        "Alignment {} error invalid UTF-16 ignored string id {}",
+                        length, id
+                    );
+                    return "Invalid UTF-16".into();
+                }
+                length /= 2;
+                let utf =
+                    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u16, length) };
+                String::from_utf16_lossy(utf)
+            }
+            Err(e) => {
+                eprintln!("get_descriptor_string failed with {} for {}", e, id);
+                "".to_string()
+            }
+        }
+    }
+
+    pub fn get_descriptor_string_iface(&mut self, iface: u16, id: u8) -> String {
+        let vec = vec![0 as u8; 64];
+        match self.control(ControlTransfer::new(
+            0x80,
+            0x06,
+            0x0300 | id as u16,
+            iface,
             Some(vec),
             100,
         )) {
