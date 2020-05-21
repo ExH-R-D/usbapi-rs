@@ -176,7 +176,6 @@ impl ControlTransfer {
             length = buf.len() as u16;
             let mut buf = std::mem::ManuallyDrop::new(buf);
             data = buf.as_mut_ptr();
-        //       println!("DATA {:X?}", &data);
         } else {
             length = 0;
             data = ptr::null_mut();
@@ -267,8 +266,42 @@ impl UsbFsUrb {
         }
     }
 
-    pub fn get_slice<'a>(&self) -> &'a mut [u8] {
+    pub fn buffer_as_ref<'a>(&self) -> &'a [u8] {
+        if self.buffer_length == 0 {
+            return &[];
+        }
         unsafe { std::slice::from_raw_parts_mut(self.buffer, self.buffer_length as usize) }
+    }
+
+    pub fn control_data_as_ref<'a>(&self) -> &'a [u8] {
+        let b = self.buffer_as_ref();
+        if b.len() < 8 {
+            return &[];
+        }
+        &b[8..8 + self.actual_length as usize]
+    }
+}
+
+impl From<(u8, ControlTransfer)> for UsbFsUrb {
+    fn from((ep, ctl): (u8, ControlTransfer)) -> Self {
+        let mut v: Vec<u8> = Vec::new();
+        v.push(ctl.request_type);
+        v.push(ctl.request);
+        v.push((ctl.value & 0x00FF) as u8);
+        v.push((ctl.value >> 8) as u8);
+        v.push((ctl.index & 0x00FF) as u8);
+        v.push((ctl.index >> 8) as u8);
+        v.push((ctl.length & 0x00FF) as u8);
+        v.push((ctl.length >> 8) as u8);
+        for a in ctl.get_slice() {
+            v.push(*a);
+        }
+        let length = v.len();
+
+        let p = v.as_mut_ptr();
+        std::mem::forget(v);
+
+        Self::new(USBFS_URB_TYPE_CONTROL, ep, p, length)
     }
 }
 
@@ -276,7 +309,7 @@ impl fmt::Display for UsbFsUrb {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "type: 0x{:02X}", self.typ)?;
         writeln!(f, "endpoint: 0x{:02X}", self.endpoint)?;
-        writeln!(f, "status: 0x{:08X}", self.status)?;
+        writeln!(f, "status: 0x{0:08X} == {0}", self.status)?;
         writeln!(f, "flags: 0x{:08X}", self.flags)?;
         writeln!(f, "buffer: {:X?}", self.buffer)?;
         writeln!(f, "buffer_length: {}", self.buffer_length)?;
@@ -299,7 +332,7 @@ pub trait UsbCoreTransfer<T> {
     fn new_bulk(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
     fn new_interrupt(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
     fn new_isochronous(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
-    // Fells akward need to rethink
+    // Feels awkward need to rethink
 }
 
 impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
@@ -455,20 +488,11 @@ impl UsbFs {
     /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, None, 1000);
     /// ```
     ///
-    pub fn control(&self, mut ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
-        let len = unsafe { usb_control_transfer(self.handle.as_raw_fd(), &mut ctrl) }?;
-        println!("res {}", len);
-        if len < 0 {
-            return Err(nix::Error::last());
-        }
-        let mut res = Vec::new();
-        ctrl.length = len as u16;
-        for d in ctrl.get_slice() {
-            res.push(*d);
-        }
-        Ok(res)
+    pub fn control(&mut self, mut ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
+        self.control_async_wait(0, ctrl)
     }
 
+    ///
     /// Blocked bulk read
     /// Consider use @async_transfer() instead.
     pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32, nix::Error> {
@@ -620,11 +644,35 @@ impl UsbFs {
     /// Send a async transfer
     /// It is up to thbe enduser to poll the file descriptor for a result.
     pub fn async_transfer(&mut self, urb: UsbFsUrb) -> Result<i32, nix::Error> {
-        println!("len {} {:02X?}", urb.buffer_length, urb.buffer);
         let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }?;
-        println!("res is: {}", res);
         self.urbs.insert(urb.endpoint, urb);
         Ok(res)
+    }
+
+    pub fn control_async_wait(
+        &mut self,
+        ep: u8,
+        ctrl: ControlTransfer,
+    ) -> Result<Vec<u8>, nix::Error> {
+        let asc = UsbFsUrb::from((ep, ctrl));
+        self.async_transfer(asc)?;
+        let urb: UsbFsUrb;
+        loop {
+            match self.async_response() {
+                Err(nix::Error::Sys(e)) if e == nix::errno::Errno::EAGAIN => {
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+                Ok(d) => {
+                    urb = d;
+                    break;
+                }
+            }
+        }
+        let data = Vec::from(urb.control_data_as_ref());
+        Ok(data)
     }
 }
 
