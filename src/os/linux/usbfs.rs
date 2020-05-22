@@ -489,7 +489,7 @@ impl UsbFs {
     /// ```
     ///
     pub fn control(&mut self, mut ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
-        self.control_async_wait(0, ctrl)
+        self.control_async_wait(ctrl)
     }
 
     ///
@@ -649,12 +649,8 @@ impl UsbFs {
         Ok(res)
     }
 
-    pub fn control_async_wait(
-        &mut self,
-        ep: u8,
-        ctrl: ControlTransfer,
-    ) -> Result<Vec<u8>, nix::Error> {
-        let asc = UsbFsUrb::from((ep, ctrl));
+    pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
+        let asc = UsbFsUrb::from((0, ctrl));
         self.async_transfer(asc)?;
         let urb: UsbFsUrb;
         loop {
