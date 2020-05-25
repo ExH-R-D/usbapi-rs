@@ -216,6 +216,8 @@ pub struct UsbFs {
     claims: Vec<u32>,
     capabilities: u32,
     urbs: HashMap<u8, UsbFsUrb>,
+    manufacturer: String,
+    product: String,
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -364,19 +366,23 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
 
 impl UsbFs {
     pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
-        UsbFs::from_bus_address(device.bus, device.address)
+        UsbFs::from_bus_device(device.bus, device.address)
     }
 
-    pub fn from_bus_address(bus: u8, address: u8) -> Result<UsbFs, io::Error> {
+    pub fn from_bus_device(bus: u8, dev: u8) -> Result<UsbFs, io::Error> {
         let mut res = UsbFs {
             handle: OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(format!("/dev/bus/usb/{:03}/{:03}", bus, address))?,
+                .open(format!("/dev/bus/usb/{:03}/{:03}", bus, dev))?,
             claims: vec![],
             capabilities: 0,
             urbs: HashMap::new(),
+            manufacturer: String::new(),
+            product: String::new(),
         };
+        res.manufacturer = res.get_descriptor_string(1);
+        res.product = res.get_descriptor_string(2);
 
         res.capabilities().unwrap();
 
@@ -642,7 +648,7 @@ impl UsbFs {
        */
 
     /// Send a async transfer
-    /// It is up to thbe enduser to poll the file descriptor for a result.
+    /// It is up to the enduser to poll the file descriptor for a result.
     pub fn async_transfer(&mut self, urb: UsbFsUrb) -> Result<i32, nix::Error> {
         let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }?;
         self.urbs.insert(urb.endpoint, urb);
