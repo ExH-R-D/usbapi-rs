@@ -65,7 +65,7 @@ impl Iterator for Descriptor {
             4 => DescriptorType::Interface(Interface::new(&mut iter)?),
             5 => DescriptorType::Endpoint(Endpoint::new(&mut iter)?),
             _ => {
-                eprintln!("Found unknown descriptor: {} {}", kind, dlength);
+                log::debug!("Found unknown descriptor: {} {}", kind, dlength);
                 let res = DescriptorType::Unknown(self.descriptor[..dlength].to_vec());
                 //                if dlength == 0 {
                 self.descriptor = vec![];

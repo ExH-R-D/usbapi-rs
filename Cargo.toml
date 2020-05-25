@@ -6,6 +6,7 @@ keywords = ["usb", "usbcore", "hardware"]
 edition="2018"
 
 [dependencies]
+log = ""
 libc=""
 nix=""
 mio = "0.6.16"
