@@ -536,6 +536,14 @@ impl UsbFs {
         Ok(res as u32)
     }
 
+    pub fn manufacturer(&self) -> &str {
+        &self.manufacturer
+    }
+
+    pub fn product(&self) -> &str {
+        &self.product
+    }
+
     //    #[allow(clippy::cast_ptr_alignment)]
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
         let vec = vec![0 as u8; 64];
