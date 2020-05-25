@@ -111,11 +111,6 @@ pub const ENDPOINT_IN: u8 = 0x80;
 #[allow(dead_code)]
 pub const ENDPOINT_OUT: u8 = 0x00;
 
-enum RequestType {
-    EndpointIN,
-    RequestTypeClass,
-}
-
 #[repr(C)]
 pub struct UsbFsIsoPacketSize {
     length: u32,
@@ -494,7 +489,7 @@ impl UsbFs {
     /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, None, 1000);
     /// ```
     ///
-    pub fn control(&mut self, mut ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
+    pub fn control(&mut self, ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
         self.control_async_wait(ctrl)
     }
 
