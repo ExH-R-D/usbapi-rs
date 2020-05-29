@@ -2,6 +2,7 @@ use crate::descriptors::descriptor::{Descriptor, DescriptorType};
 use crate::descriptors::device::Device;
 use crate::descriptors::endpoint::Endpoint;
 use crate::descriptors::interface::Interface;
+use crate::UsbCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -13,6 +14,8 @@ use std::path::Path;
 pub struct UsbDevice {
     pub bus: u8,
     pub address: u8,
+    pub manufacturer: String,
+    pub product: String,
     pub device: Device,
 }
 
@@ -23,11 +26,13 @@ impl fmt::Display for UsbDevice {
 }
 
 impl UsbDevice {
-    fn new(bus: u8, address: u8, device: Device) -> Self {
+    fn new(bus: u8, dev: u8, device: Device, manufacturer: String, product: String) -> Self {
         UsbDevice {
             bus,
-            address,
+            address: dev,
             device,
+            product,
+            manufacturer,
         }
     }
 }
@@ -79,17 +84,28 @@ impl UsbEnumerate {
         Ok(())
     }
 
-    fn add_device(&mut self, file: &DirEntry, bus: u8, address: u8) {
+    fn add_device(&mut self, file: &DirEntry, bus: u8, dev: u8) {
         if let Some(mut descs) = Descriptor::from_file(&file.path()) {
-            let mut device: Option<UsbDevice> = None;
+            let mut device;
             if let Some(kind) = descs.next() {
-                if let DescriptorType::Device(dev) = kind {
-                    device = Some(UsbDevice::new(bus, address, dev));
+                if let DescriptorType::Device(devicet) = kind {
+                    let usb = UsbCore::from_bus_device(bus, dev);
+                    match usb {
+                        Ok(mut usb) => {
+                            let vendor = usb.get_descriptor_string(devicet.imanufacturer.clone());
+                            let product = usb.get_descriptor_string(devicet.iproduct.clone());
+                            device = UsbDevice::new(bus, dev, devicet, vendor, product);
+                        }
+                        Err(_) => {
+                            device = UsbDevice::new(bus, dev, devicet, "".into(), "".into());
+                        }
+                    }
                 } else {
                     panic!("Could not enumerate device");
                 }
+            } else {
+                panic!("{}-{} has no descriptors?", bus, dev);
             }
-            let mut device = device.unwrap();
             for kind in descs {
                 match kind {
                     DescriptorType::Configuration(conf) => {
