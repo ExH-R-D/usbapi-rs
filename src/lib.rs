@@ -5,6 +5,7 @@ pub use os::linux::usbfs::{UsbCoreTransfer, UsbTransfer};
 /* Unsure if this is the correct way do it... */
 #[cfg(target_os = "linux")]
 pub use os::linux::enumerate::UsbEnumerate;
+pub use os::linux::usb_device::UsbDevice;
 #[cfg(target_os = "linux")]
 pub use os::linux::usbfs::ControlTransfer;
 #[cfg(target_os = "linux")]

@@ -1,4 +1,4 @@
-use crate::os::linux::enumerate::UsbDevice;
+use crate::UsbDevice;
 use mio::event::Evented;
 use mio::unix::EventedFd;
 use mio::{Poll, PollOpt, Ready, Token};
@@ -12,55 +12,6 @@ use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 use std::result::Result;
-impl Evented for UsbFs {
-    fn register(
-        &self,
-        poll: &Poll,
-        token: Token,
-        interest: Ready,
-        opts: PollOpt,
-    ) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).register(poll, token, interest, opts)
-    }
-
-    fn reregister(
-        &self,
-        poll: &Poll,
-        token: Token,
-        interest: Ready,
-        opts: PollOpt,
-    ) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).reregister(poll, token, interest, opts)
-    }
-
-    fn deregister(&self, poll: &Poll) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).deregister(poll)
-    }
-}
-
-#[macro_export]
-macro_rules! ioctl_read_ptr {
-    ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
-        $(#[$attr])*
-        pub unsafe fn $name(fd: $crate::libc::c_int,
-                            data: *const $ty)
-                            -> $crate::Result<$crate::libc::c_int> {
-            convert_ioctl_res!($crate::libc::ioctl(fd, request_code_read!($ioty, $nr, ::std::mem::size_of::<$ty>()) as $crate::sys::ioctl::ioctl_num_type, data))
-        }
-    )
-}
-
-#[macro_export]
-macro_rules! ioctl_readwrite_ptr {
-    ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
-        $(#[$attr])*
-            pub unsafe fn $name(fd: $crate::libc::c_int,
-                                data: *mut $ty)
-                                -> $crate::Result<$crate::libc::c_int> {
-                                    convert_ioctl_res!($crate::libc::ioctl(fd, request_code_readwrite!($ioty, $nr, ::std::mem::size_of::<$ty>()) as $crate::sys::ioctl::ioctl_num_type, data))
-            }
-    )
-}
 
 #[allow(dead_code)]
 const USBFS_CAP_ZERO_PACKET: u8 = 0x01;
@@ -110,6 +61,56 @@ pub const REQUEST_TYPE_CLASS: u8 = 0x01 << 5;
 pub const ENDPOINT_IN: u8 = 0x80;
 #[allow(dead_code)]
 pub const ENDPOINT_OUT: u8 = 0x00;
+
+impl Evented for UsbFs {
+    fn register(
+        &self,
+        poll: &Poll,
+        token: Token,
+        interest: Ready,
+        opts: PollOpt,
+    ) -> io::Result<()> {
+        EventedFd(&self.handle.as_raw_fd()).register(poll, token, interest, opts)
+    }
+
+    fn reregister(
+        &self,
+        poll: &Poll,
+        token: Token,
+        interest: Ready,
+        opts: PollOpt,
+    ) -> io::Result<()> {
+        EventedFd(&self.handle.as_raw_fd()).reregister(poll, token, interest, opts)
+    }
+
+    fn deregister(&self, poll: &Poll) -> io::Result<()> {
+        EventedFd(&self.handle.as_raw_fd()).deregister(poll)
+    }
+}
+
+#[macro_export]
+macro_rules! ioctl_read_ptr {
+    ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
+        $(#[$attr])*
+        pub unsafe fn $name(fd: $crate::libc::c_int,
+                            data: *const $ty)
+                            -> $crate::Result<$crate::libc::c_int> {
+            convert_ioctl_res!($crate::libc::ioctl(fd, request_code_read!($ioty, $nr, ::std::mem::size_of::<$ty>()) as $crate::sys::ioctl::ioctl_num_type, data))
+        }
+    )
+}
+
+#[macro_export]
+macro_rules! ioctl_readwrite_ptr {
+    ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
+        $(#[$attr])*
+            pub unsafe fn $name(fd: $crate::libc::c_int,
+                                data: *mut $ty)
+                                -> $crate::Result<$crate::libc::c_int> {
+                                    convert_ioctl_res!($crate::libc::ioctl(fd, request_code_readwrite!($ioty, $nr, ::std::mem::size_of::<$ty>()) as $crate::sys::ioctl::ioctl_num_type, data))
+            }
+    )
+}
 
 #[repr(C)]
 pub struct UsbFsIsoPacketSize {
@@ -191,8 +192,8 @@ impl ControlTransfer {
         if self.length == 0 || self.data.is_null() {
             return &[];
         }
-        let s = unsafe { std::slice::from_raw_parts_mut(self.data, self.length as usize) };
-        s
+
+        unsafe { std::slice::from_raw_parts_mut(self.data, self.length as usize) }
     }
 }
 
@@ -211,8 +212,9 @@ pub struct UsbFs {
     claims: Vec<u32>,
     capabilities: u32,
     urbs: HashMap<u8, UsbFsUrb>,
-    manufacturer: String,
-    product: String,
+    pub(crate) bus_dev: (u8, u8),
+    descriptors: Option<UsbDevice>,
+    read_only: bool,
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -364,6 +366,25 @@ impl UsbFs {
         UsbFs::from_bus_device(device.bus, device.address)
     }
 
+    pub fn from_bus_device_read_only(bus: u8, dev: u8) -> Result<UsbFs, io::Error> {
+        let mut res = UsbFs {
+            handle: OpenOptions::new()
+                .read(true)
+                .write(false)
+                .open(format!("/dev/bus/usb/{:03}/{:03}", bus, dev))?,
+            claims: vec![],
+            capabilities: 0,
+            urbs: HashMap::new(),
+            descriptors: None,
+            bus_dev: (bus, dev),
+            read_only: true,
+        };
+
+        res.descriptors();
+
+        Ok(res)
+    }
+
     pub fn from_bus_device(bus: u8, dev: u8) -> Result<UsbFs, io::Error> {
         let mut res = UsbFs {
             handle: OpenOptions::new()
@@ -373,21 +394,42 @@ impl UsbFs {
             claims: vec![],
             capabilities: 0,
             urbs: HashMap::new(),
-            manufacturer: String::new(),
-            product: String::new(),
+            descriptors: None,
+            bus_dev: (bus, dev),
+            read_only: false,
         };
-        res.manufacturer = res.get_descriptor_string(1);
-        res.product = res.get_descriptor_string(2);
 
-        res.capabilities().unwrap();
+        res.descriptors();
 
         Ok(res)
+    }
+
+    pub(crate) fn handle(&self) -> &std::fs::File {
+        &self.handle
+    }
+
+    pub fn descriptors(&mut self) -> &Option<UsbDevice> {
+        if self.descriptors.is_none() {
+            self.descriptors = UsbDevice::from_usb_raw(self);
+        }
+
+        &self.descriptors
+    }
+
+    /// This avoid copy used by enumerator
+    pub(crate) fn take_descriptors(&mut self) -> Option<UsbDevice> {
+        if self.descriptors.is_none() {
+            self.descriptors = UsbDevice::from_usb_raw(self);
+        }
+
+        self.descriptors.take()
     }
 
     pub fn capabilities(&mut self) -> Result<u32, nix::Error> {
         if self.capabilities != 0 {
             return Ok(self.capabilities);
         }
+
         let res = unsafe { usb_get_capabilities(self.handle.as_raw_fd(), &mut self.capabilities) };
         if res != Ok(0) {
             return Err(nix::Error::Sys(nix::errno::Errno::last()));
@@ -531,48 +573,16 @@ impl UsbFs {
         Ok(res as u32)
     }
 
-    pub fn manufacturer(&self) -> &str {
-        &self.manufacturer
-    }
-
-    pub fn product(&self) -> &str {
-        &self.product
-    }
-
     //    #[allow(clippy::cast_ptr_alignment)]
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
-        let vec = vec![0 as u8; 64];
-        match self.control(ControlTransfer::new(
-            0x80,
-            0x06,
-            0x0300 | id as u16,
-            0,
-            Some(vec),
-            100,
-        )) {
-            Ok(data) => {
-                let mut length = data.len();
-                if length % 2 != 0 || length == 0 {
-                    eprintln!(
-                        "Alignment {} error invalid UTF-16 ignored string id {}",
-                        length, id
-                    );
-                    return "Invalid UTF-16".into();
-                }
-                length /= 2;
-                let utf =
-                    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u16, length) };
-                String::from_utf16_lossy(utf)
-            }
-            Err(e) => {
-                eprintln!("get_descriptor_string failed with {} for {}", e, id);
-                "".to_string()
-            }
-        }
+        self.get_descriptor_string_iface(0, id)
     }
 
     pub fn get_descriptor_string_iface(&mut self, iface: u16, id: u8) -> String {
-        let vec = vec![0 as u8; 64];
+        if self.read_only {
+            return "".into();
+        }
+        let vec = vec![0 as u8; 1024];
         match self.control(ControlTransfer::new(
             0x80,
             0x06,

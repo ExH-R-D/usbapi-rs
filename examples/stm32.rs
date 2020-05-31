@@ -30,7 +30,7 @@ fn main() -> Result<(), std::io::Error> {
             );
             println!(
                 "Serial: {}",
-                usb.get_descriptor_string(device.device.iserial_number)
+                usb.get_descriptor_string(device.device.iserial)
             );
             let _ = usb.claim_interface(1).is_ok();
             match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, None, 100)) {

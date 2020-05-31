@@ -3,13 +3,13 @@ use super::device::Device;
 use super::endpoint::Endpoint;
 use super::interface::Interface;
 use std::io::BufReader;
-use std::io::Read;
+use std::io::{Bytes, Read};
 #[derive(Debug)]
 pub struct Descriptor {
     pub descriptor: Vec<u8>,
 }
 
-//#[derive(Debug)]
+#[derive(Debug)]
 pub enum DescriptorType {
     Device(Device),
     Configuration(Configuration),
@@ -89,10 +89,9 @@ impl Descriptor {
         desc
     }
 
-    /// FIXME uglyish hackish
-    pub fn from_file(file_path: &std::path::Path) -> Option<Self> {
+    /// FIXME uglyish hackish kill it
+    pub fn from_path(file_path: &std::path::Path) -> Option<Self> {
         use std::fs::File;
-        use std::io::prelude::*;
         let file = match File::open(file_path) {
             Ok(file) => file,
             Err(e) => {
@@ -100,12 +99,21 @@ impl Descriptor {
                 return None;
             }
         };
+        match Self::from_bytes(file.bytes()) {
+            Ok(d) => Some(d),
+            Err(_) => None,
+        }
+    }
 
+    pub fn from_bytes<T>(bytes: Bytes<T>) -> Result<Self, std::io::Error>
+    where
+        T: Read,
+    {
         let mut desc = Descriptor { descriptor: vec![] };
-        for byte in file.bytes() {
+        for byte in bytes {
             desc.descriptor.push(byte.unwrap());
         }
 
-        Some(desc)
+        Ok(desc)
     }
 }

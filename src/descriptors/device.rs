@@ -22,7 +22,7 @@ pub struct Device {
     pub bcd_device: u16,
     pub imanufacturer: u8,
     pub iproduct: u8,
-    pub iserial_number: u8,
+    pub iserial: u8,
     pub num_configurations: u8,
     pub configurations: Vec<Configuration>,
 }
@@ -48,7 +48,7 @@ impl Device {
             bcd_device: *iter.next()? as u16 | (*iter.next()? as u16) << 8,
             imanufacturer: *iter.next()?,
             iproduct: *iter.next()?,
-            iserial_number: *iter.next()?,
+            iserial: *iter.next()?,
             num_configurations: *iter.next()?,
             configurations: vec![],
         })
