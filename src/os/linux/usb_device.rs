@@ -87,7 +87,7 @@ impl UsbDevice {
                     }
                 }
                 _ => {
-                    log::warn!("Unknown descriptor type: {:?}", kind);
+                    log::debug!("Unknown descriptor type: {:?}", kind);
                 }
             };
         }
