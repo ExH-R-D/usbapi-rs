@@ -675,12 +675,21 @@ impl UsbFs {
     }
 
     pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
+        let mut timeout = ctrl.timeout;
         let asc = UsbFsUrb::from((0, ctrl));
         self.async_transfer(asc)?;
         let urb: UsbFsUrb;
+        if timeout == 0 {
+            timeout = 0xFFFF;
+        }
         loop {
             match self.async_response() {
                 Err(nix::Error::Sys(e)) if e == nix::errno::Errno::EAGAIN => {
+                    if timeout == 0 {
+                        return Err(nix::Error::Sys(e));
+                    }
+                    timeout -= 1;
+                    std::thread::sleep(std::time::Duration::from_millis(1));
                     continue;
                 }
                 Err(e) => {
