@@ -227,6 +227,7 @@ ioctl_read_ptr!(usb_claim_interface, b'U', 15, u32);
 ioctl_read_ptr!(usb_release_interface, b'U', 16, u32);
 ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
+ioctl_none!(usb_reset, b'U', 20);
 
 #[derive(Debug)]
 #[repr(C)]
@@ -406,6 +407,11 @@ impl UsbFs {
 
     pub(crate) fn handle(&self) -> &std::fs::File {
         &self.handle
+    }
+
+    pub fn reset(&mut self) -> Result<(), nix::Error> {
+        unsafe { usb_reset(self.handle.as_raw_fd()) }?;
+        Ok(())
     }
 
     pub fn descriptors(&mut self) -> &Option<UsbDevice> {
@@ -693,6 +699,7 @@ impl UsbFs {
 
 impl Drop for UsbFs {
     fn drop(&mut self) {
+        //log::debug!("UsbCore dropped: {:?}", self.descriptors);
         for claim in &self.claims {
             if self.release_interface(*claim).is_ok() {};
         }
