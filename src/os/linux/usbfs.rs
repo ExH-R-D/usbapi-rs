@@ -615,14 +615,13 @@ impl UsbFs {
                 String::from_utf16_lossy(utf)
             }
             Err(e) => {
-                log::error!("get_descriptor_string failed with {} for {}", e, id);
-                if self.reset == 0 {
-                    if let Ok(()) = self.reset() {
-                        log::debug!("Reset {}-{}", self.bus_dev.0, self.bus_dev.1);
-                        self.reset += 1;
-                        return self.get_descriptor_string_iface(iface, id);
-                    }
-                }
+                log::error!(
+                    "get_descriptor_string on {}-{} failed with {} on wIndex {}",
+                    e,
+                    self.bus_dev.0,
+                    self.bus_dev.1,
+                    id
+                );
                 "".to_string()
             }
         }
