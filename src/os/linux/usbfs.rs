@@ -215,6 +215,7 @@ pub struct UsbFs {
     pub(crate) bus_dev: (u8, u8),
     descriptors: Option<UsbDevice>,
     read_only: bool,
+    reset: usize,
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -379,6 +380,7 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: true,
+            reset: 0,
         };
 
         res.descriptors();
@@ -398,6 +400,7 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: false,
+            reset: 0,
         };
 
         res.descriptors();
@@ -612,7 +615,14 @@ impl UsbFs {
                 String::from_utf16_lossy(utf)
             }
             Err(e) => {
-                eprintln!("get_descriptor_string failed with {} for {}", e, id);
+                log::error!("get_descriptor_string failed with {} for {}", e, id);
+                if self.reset == 0 {
+                    if let Ok(()) = self.reset() {
+                        log::debug!("Reset {}-{}", self.bus_dev.0, self.bus_dev.1);
+                        self.reset += 1;
+                        return self.get_descriptor_string_iface(iface, id);
+                    }
+                }
                 "".to_string()
             }
         }
