@@ -617,9 +617,9 @@ impl UsbFs {
             Err(e) => {
                 log::error!(
                     "get_descriptor_string on {}-{} failed with {} on wIndex {}",
-                    e,
                     self.bus_dev.0,
                     self.bus_dev.1,
+                    e,
                     id
                 );
                 "".to_string()
