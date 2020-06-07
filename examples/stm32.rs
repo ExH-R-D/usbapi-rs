@@ -9,8 +9,7 @@ fn main() -> Result<(), std::io::Error> {
     signal_hook::flag::register(signal_hook::SIGTERM, Arc::clone(&term)).unwrap();
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&term)).unwrap();
 
-    let mut usb = UsbEnumerate::new();
-    usb.enumerate().expect("Could not find /dev/bus/usb are you running windows or maybe freebsd or mac or... whatever feel free to add a patch :)");
+    let usb = UsbEnumerate::from_sysfs()?;
 
     for (_bus_address, device) in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {

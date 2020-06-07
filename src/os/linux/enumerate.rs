@@ -10,22 +10,7 @@ pub struct UsbEnumerate {
 }
 
 impl UsbEnumerate {
-    #[deprecated(
-        since = "0.1.0",
-        note = "please use `from_sysfs or from_usbfs` instead"
-    )]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[deprecated(
-        since = "0.1.0",
-        note = "please use `from_sysfs or from_usbfs` instead"
-    )]
-    pub fn enumerate(&mut self) -> io::Result<()> {
-        self.read_dir(Path::new("/dev/bus/usb/"))
-    }
-
+    #[deprecated(since = "0.1.0", note = "please use `from_sysfs` instead")]
     pub fn from_usbfs() -> io::Result<Self> {
         let mut e = Self::default();
         e.read_dir(Path::new("/dev/bus/usb/"))?;
