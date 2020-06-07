@@ -73,7 +73,6 @@ impl UsbDevice {
                 f(&mut device);
                 Some((descs, device))
             } else {
-                log::error!("Descriptor read failed");
                 None
             }
         } else {
