@@ -1,6 +1,6 @@
 [package]
 name = "usbapi"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Mikael Hermansson <mikael.hermansson@mykolab.com>"]
 keywords = ["usb", "usbcore", "hardware"]
 edition="2018"
@@ -12,6 +12,7 @@ nix=""
 mio = "0.6.16"
 serde={version = '1.0', features=['derive']}
 serde-hex="" 
+sysfs-bus = { git="https://gitlab.com/mike7b4/sysfs_bus.git" }
 
 [dev-dependencies]
 signal-hook = "0.1.5"

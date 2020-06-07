@@ -10,12 +10,47 @@ pub struct UsbEnumerate {
 }
 
 impl UsbEnumerate {
+    #[deprecated(
+        since = "0.1.0",
+        note = "please use `from_sysfs or from_usbfs` instead"
+    )]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[deprecated(
+        since = "0.1.0",
+        note = "please use `from_sysfs or from_usbfs` instead"
+    )]
     pub fn enumerate(&mut self) -> io::Result<()> {
         self.read_dir(Path::new("/dev/bus/usb/"))
+    }
+
+    pub fn from_usbfs() -> io::Result<Self> {
+        let mut e = Self::default();
+        e.read_dir(Path::new("/dev/bus/usb/"))?;
+        Ok(e)
+    }
+
+    pub fn from_sysfs() -> io::Result<Self> {
+        use sysfs_bus::SysFsBus;
+        let mut e = Self::default();
+        let bus = SysFsBus::enumerate("/sys/bus/usb/devices")?;
+        for (_syspath, dev) in bus.devices() {
+            let dev = UsbDevice::from_bytes(dev.descriptors.clone(), |mut d| {
+                d.product = dev.product.clone();
+                d.manufacturer = dev.manufacturer.clone();
+                d.serial = dev.serial.clone();
+                d.bus_num = dev.bus_num.unwrap();
+                d.dev_num = dev.dev_num.unwrap();
+            });
+            if let Some(dev) = dev {
+                e.devices
+                    .insert(format!("{}-{}", dev.bus_num, dev.dev_num), dev);
+            }
+        }
+
+        Ok(e)
     }
 
     fn read_dir(&mut self, dir: &Path) -> io::Result<()> {
@@ -65,7 +100,7 @@ impl UsbEnumerate {
         };
 
         if let Some(dev) = core.take_descriptors() {
-            let bus_address = format!("{}-{}", dev.bus, dev.address);
+            let bus_address = format!("{}-{}", dev.bus_num, dev.dev_num);
             self.devices.insert(bus_address, dev);
         }
         Ok(())

@@ -365,7 +365,7 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
 
 impl UsbFs {
     pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
-        UsbFs::from_bus_device(device.bus, device.address)
+        UsbFs::from_bus_device(device.bus_num, device.dev_num)
     }
 
     pub fn from_bus_device_read_only(bus: u8, dev: u8) -> Result<UsbFs, io::Error> {

@@ -6,9 +6,8 @@ use std::fmt;
 use std::io::prelude::*;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UsbDevice {
-    pub bus: u8,
-    // FIXME change name to device
-    pub address: u8,
+    pub bus_num: u8,
+    pub dev_num: u8,
     pub manufacturer: String,
     pub product: String,
     pub serial: String,
@@ -17,22 +16,22 @@ pub struct UsbDevice {
 
 impl fmt::Display for UsbDevice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}\n{}", self.bus, self.address, self.device)
+        write!(f, "{}:{}\n{}", self.bus_num, self.dev_num, self.device)
     }
 }
 
 impl UsbDevice {
     pub(crate) fn new(
-        bus: u8,
-        dev: u8,
+        bus_num: u8,
+        dev_num: u8,
         device: Device,
         manufacturer: String,
         product: String,
         serial: String,
     ) -> Self {
         UsbDevice {
-            bus,
-            address: dev,
+            bus_num,
+            dev_num,
             device,
             product,
             manufacturer,
@@ -41,23 +40,38 @@ impl UsbDevice {
     }
 
     pub(crate) fn from_usb_raw(usb: &mut UsbCore) -> Option<Self> {
-        let device;
-        let descs = if let Ok(mut descs) = Descriptor::from_bytes(usb.handle().bytes()) {
+        let mut bytes = Vec::new();
+        if usb.handle().read_to_end(&mut bytes).is_err() {
+            log::error!(
+                "Could not read descriptors on device {}-{}",
+                usb.bus_dev.0,
+                usb.bus_dev.1
+            );
+            return None;
+        }
+
+        Self::from_bytes(bytes, |mut d| {
+            d.bus_num = usb.bus_dev.0;
+            d.dev_num = usb.bus_dev.1;
+            d.manufacturer = usb.get_descriptor_string(d.device.imanufacturer.clone());
+            d.product = usb.get_descriptor_string(d.device.iproduct.clone());
+            d.serial = usb.get_descriptor_string(d.device.iserial.clone());
+        })
+    }
+
+    pub(crate) fn from_bytes<F>(vec: Vec<u8>, mut f: F) -> Option<Self>
+    where
+        F: FnMut(&mut Self),
+    {
+        let device: UsbDevice;
+        let descs = if let Ok(mut descs) = Descriptor::from_bytes(vec.bytes()) {
             if let DescriptorType::Device(dev) = descs
                 .next()
                 .unwrap_or_else(|| DescriptorType::Unknown(vec![]))
             {
-                let manufacturer = usb.get_descriptor_string(dev.imanufacturer.clone());
-                let product = usb.get_descriptor_string(dev.iproduct.clone());
-                let serial = usb.get_descriptor_string(dev.iserial.clone());
-                device = UsbDevice::new(
-                    usb.bus_dev.0,
-                    usb.bus_dev.1,
-                    dev,
-                    manufacturer,
-                    product,
-                    serial,
-                );
+                let mut device: UsbDevice =
+                    UsbDevice::new(0, 0, dev, String::new(), String::new(), String::new());
+                f(&mut device);
                 Some((descs, device))
             } else {
                 log::error!("Descriptor read failed");
