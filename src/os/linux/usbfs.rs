@@ -215,7 +215,6 @@ pub struct UsbFs {
     pub(crate) bus_dev: (u8, u8),
     descriptors: Option<UsbDevice>,
     read_only: bool,
-    reset: usize,
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -380,7 +379,6 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: true,
-            reset: 0,
         };
 
         res.descriptors();
@@ -400,7 +398,6 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: false,
-            reset: 0,
         };
 
         res.descriptors();

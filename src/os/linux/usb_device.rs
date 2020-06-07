@@ -16,7 +16,7 @@ pub struct UsbDevice {
 
 impl fmt::Display for UsbDevice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}\n{}", self.bus_num, self.dev_num, self.device)
+        write!(f, "{}-{}\n{}", self.bus_num, self.dev_num, self.device)
     }
 }
 
@@ -63,7 +63,6 @@ impl UsbDevice {
     where
         F: FnMut(&mut Self),
     {
-        let device: UsbDevice;
         let descs = if let Ok(mut descs) = Descriptor::from_bytes(vec.bytes()) {
             if let DescriptorType::Device(dev) = descs
                 .next()
