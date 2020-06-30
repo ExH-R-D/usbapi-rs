@@ -21,18 +21,16 @@ impl UsbEnumerate {
         use sysfs_bus::SysFsBus;
         let mut e = Self::default();
         let bus = SysFsBus::enumerate("/sys/bus/usb/devices")?;
-        for (_syspath, dev) in bus.devices() {
+        for dev in bus.devices().values() {
             let dev = UsbDevice::from_bytes(dev.descriptors.clone(), |mut d| {
                 d.product = dev.product.clone();
                 d.manufacturer = dev.manufacturer.clone();
                 d.serial = dev.serial.clone();
                 d.bus_num = dev.bus_num.unwrap();
                 d.dev_num = dev.dev_num.unwrap();
-            });
-            if let Some(dev) = dev {
-                e.devices
-                    .insert(format!("{}-{}", dev.bus_num, dev.dev_num), dev);
-            }
+            })?;
+            e.devices
+                .insert(format!("{}-{}", dev.bus_num, dev.dev_num), dev);
         }
 
         Ok(e)

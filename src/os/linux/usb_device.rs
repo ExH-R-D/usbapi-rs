@@ -39,47 +39,28 @@ impl UsbDevice {
         }
     }
 
-    pub(crate) fn from_usb_raw(usb: &mut UsbCore) -> Option<Self> {
-        let mut bytes = Vec::new();
-        if usb.handle().read_to_end(&mut bytes).is_err() {
-            log::error!(
-                "Could not read descriptors on device {}-{}",
-                usb.bus_dev.0,
-                usb.bus_dev.1
-            );
-            return None;
-        }
-
-        Self::from_bytes(bytes, |mut d| {
-            d.bus_num = usb.bus_dev.0;
-            d.dev_num = usb.bus_dev.1;
-            d.manufacturer = usb.get_descriptor_string(d.device.imanufacturer.clone());
-            d.product = usb.get_descriptor_string(d.device.iproduct.clone());
-            d.serial = usb.get_descriptor_string(d.device.iserial.clone());
-        })
-    }
-
-    pub(crate) fn from_bytes<F>(vec: Vec<u8>, mut f: F) -> Option<Self>
+    pub(crate) fn from_bytes<F>(
+        vec: Vec<u8>,
+        mut fill_descriptor_strings: F,
+    ) -> Result<Self, std::io::Error>
     where
         F: FnMut(&mut Self),
     {
-        let descs = if let Ok(mut descs) = Descriptor::from_bytes(vec.bytes()) {
-            if let DescriptorType::Device(dev) = descs
-                .next()
-                .unwrap_or_else(|| DescriptorType::Unknown(vec![]))
-            {
-                let mut device: UsbDevice =
-                    UsbDevice::new(0, 0, dev, String::new(), String::new(), String::new());
-                f(&mut device);
-                Some((descs, device))
-            } else {
-                None
-            }
-        } else {
-            return None;
-        };
+        use std::io::{Error, ErrorKind};
+        let mut descs = Descriptor::from_bytes(vec.bytes())?;
+        // The first descriptor should be the device
+        // If not well then something is bad
+        let device = match descs.next() {
+            Some(dev) => match dev {
+                DescriptorType::Device(d) => Ok(d),
+                _ => Err(Error::new(ErrorKind::Other, "Failed to read descriptors")),
+            },
+            None => Err(Error::new(ErrorKind::Other, "Failed to read descriptors")),
+        }?;
+        let mut device: UsbDevice =
+            UsbDevice::new(0, 0, device, String::new(), String::new(), String::new());
+        fill_descriptor_strings(&mut device);
 
-        let (descs, mut device) = descs?;
         for kind in descs {
             match kind {
                 DescriptorType::Configuration(conf) => {
@@ -103,6 +84,19 @@ impl UsbDevice {
                 }
             };
         }
-        Some(device)
+        Ok(device)
+    }
+
+    pub fn from_usbcore(usb: &mut UsbCore) -> Result<Self, std::io::Error> {
+        let mut bytes = Vec::new();
+        usb.handle().read_to_end(&mut bytes)?;
+
+        Self::from_bytes(bytes, |mut d| {
+            d.bus_num = usb.bus_dev.0;
+            d.dev_num = usb.bus_dev.1;
+            d.manufacturer = usb.get_descriptor_string(d.device.imanufacturer);
+            d.product = usb.get_descriptor_string(d.device.iproduct);
+            d.serial = usb.get_descriptor_string(d.device.iserial);
+        })
     }
 }

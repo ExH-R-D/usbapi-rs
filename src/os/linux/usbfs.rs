@@ -416,7 +416,7 @@ impl UsbFs {
 
     pub fn descriptors(&mut self) -> &Option<UsbDevice> {
         if self.descriptors.is_none() {
-            self.descriptors = UsbDevice::from_usb_raw(self);
+            self.descriptors = UsbDevice::from_usbcore(self).ok();
         }
 
         &self.descriptors
@@ -424,10 +424,6 @@ impl UsbFs {
 
     /// This avoid copy used by enumerator
     pub(crate) fn take_descriptors(&mut self) -> Option<UsbDevice> {
-        if self.descriptors.is_none() {
-            self.descriptors = UsbDevice::from_usb_raw(self);
-        }
-
         self.descriptors.take()
     }
 
