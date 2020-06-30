@@ -53,9 +53,18 @@ impl UsbDevice {
         let device = match descs.next() {
             Some(dev) => match dev {
                 DescriptorType::Device(d) => Ok(d),
-                _ => Err(Error::new(ErrorKind::Other, "Failed to read descriptors")),
+                _ => Err(Error::new(
+                    ErrorKind::Other,
+                    format!(
+                        "Wrong descriptor detected: {:?} expected DeviceDescriptor",
+                        dev
+                    ),
+                )),
             },
-            None => Err(Error::new(ErrorKind::Other, "Failed to read descriptors")),
+            None => Err(Error::new(
+                ErrorKind::Other,
+                format!("No device descriptor found. {:?}", vec),
+            )),
         }?;
         let mut device: UsbDevice =
             UsbDevice::new(0, 0, device, String::new(), String::new(), String::new());
@@ -90,7 +99,6 @@ impl UsbDevice {
     pub fn from_usbcore(usb: &mut UsbCore) -> Result<Self, std::io::Error> {
         let mut bytes = Vec::new();
         usb.handle().read_to_end(&mut bytes)?;
-
         Self::from_bytes(bytes, |mut d| {
             d.bus_num = usb.bus_dev.0;
             d.dev_num = usb.bus_dev.1;

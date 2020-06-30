@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
+use sysfs_bus::SysFs;
 
 #[derive(Default)]
 pub struct UsbEnumerate {
@@ -18,11 +19,11 @@ impl UsbEnumerate {
     }
 
     pub fn from_sysfs() -> io::Result<Self> {
-        use sysfs_bus::SysFsBus;
         let mut e = Self::default();
-        let bus = SysFsBus::enumerate("/sys/bus/usb/devices")?;
-        for dev in bus.devices().values() {
+        let devices = SysFs::usb_devices()?;
+        for dev in devices.values() {
             let dev = UsbDevice::from_bytes(dev.descriptors.clone(), |mut d| {
+                println!("{}", dev.product);
                 d.product = dev.product.clone();
                 d.manufacturer = dev.manufacturer.clone();
                 d.serial = dev.serial.clone();
@@ -36,6 +37,7 @@ impl UsbEnumerate {
         Ok(e)
     }
 
+    #[deprecated(since = "0.1.0", note = "please use `from_sysfs` instead")]
     fn read_dir(&mut self, dir: &Path) -> io::Result<()> {
         for entry in fs::read_dir(dir).expect("Can't access usbpath?") {
             if let Err(e) = entry {
