@@ -1,9 +1,27 @@
 use crate::{UsbCore, UsbDevice};
 use std::collections::HashMap;
-use std::fs;
-use std::io;
-use std::path::Path;
-use sysfs_bus::SysFs;
+use std::convert::{TryFrom, TryInto};
+use std::io::{Error, ErrorKind};
+use sysfs_serde::{SysFs, UsbDevices};
+
+impl TryFrom<UsbDevices> for UsbEnumerate {
+    type Error = std::io::Error;
+    fn try_from(sysfs: UsbDevices) -> Result<Self, Self::Error> {
+        let mut en = Self::default();
+        for dev in sysfs.values() {
+            let dev = UsbDevice::from_bytes(dev.descriptors.clone(), |mut d| {
+                d.product = dev.product.clone();
+                d.manufacturer = dev.manufacturer.clone();
+                d.serial = dev.serial.clone();
+                d.bus_num = dev.bus_num;
+                d.dev_num = dev.dev_num;
+            })?;
+            en.devices
+                .insert(format!("{}-{}", dev.bus_num, dev.dev_num), dev);
+        }
+        Ok(en)
+    }
+}
 
 #[derive(Default)]
 pub struct UsbEnumerate {
@@ -11,69 +29,10 @@ pub struct UsbEnumerate {
 }
 
 impl UsbEnumerate {
-    #[deprecated(since = "0.1.0", note = "please use `from_sysfs` instead")]
-    pub fn from_usbfs() -> io::Result<Self> {
-        let mut e = Self::default();
-        e.read_dir(Path::new("/dev/bus/usb/"))?;
-        Ok(e)
-    }
-
-    pub fn from_sysfs() -> io::Result<Self> {
-        let mut e = Self::default();
-        let devices = SysFs::usb_devices()?;
-        for dev in devices.values() {
-            let dev = UsbDevice::from_bytes(dev.descriptors.clone(), |mut d| {
-                println!("{}", dev.product);
-                d.product = dev.product.clone();
-                d.manufacturer = dev.manufacturer.clone();
-                d.serial = dev.serial.clone();
-                d.bus_num = dev.bus_num.unwrap();
-                d.dev_num = dev.dev_num.unwrap();
-            })?;
-            e.devices
-                .insert(format!("{}-{}", dev.bus_num, dev.dev_num), dev);
-        }
-
-        Ok(e)
-    }
-
-    #[deprecated(since = "0.1.0", note = "please use `from_sysfs` instead")]
-    fn read_dir(&mut self, dir: &Path) -> io::Result<()> {
-        for entry in fs::read_dir(dir).expect("Can't access usbpath?") {
-            if let Err(e) = entry {
-                log::error!("Could not read {:?} entry cause {}", dir, e);
-                continue;
-            }
-
-            let path = entry.and_then(|e| Ok(e.path()))?;
-            if path.is_dir() {
-                self.read_dir(&path)?;
-            } else {
-                let bus: u8 = path
-                    .parent()
-                    .unwrap()
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .parse::<u8>()
-                    .expect("Something is broken could not parse bus as u8");
-                let address: u8 = path
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .parse::<u8>()
-                    .expect("Something is smoking could not parse address from dirname {}");
-                self.add_device(bus, address).unwrap_or_else(|e| {
-                    log::error!(
-                        "Could not read descriptors on USB: {}-{} cause {}",
-                        bus,
-                        address,
-                        e
-                    )
-                });
-            }
-        }
-        Ok(())
+    pub fn from_sysfs() -> std::io::Result<Self> {
+        Ok(SysFs::usb_devices()
+            .map_err(|e| Error::new(ErrorKind::Other, e))?
+            .try_into()?)
     }
 
     fn add_device(&mut self, bus: u8, dev: u8) -> Result<(), std::io::Error> {
