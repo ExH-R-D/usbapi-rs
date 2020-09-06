@@ -11,7 +11,7 @@ use std::io;
 use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::ptr;
-use std::result::Result;
+//use std::result::Result;
 
 #[allow(dead_code)]
 const USBFS_CAP_ZERO_PACKET: u8 = 0x01;
@@ -92,10 +92,10 @@ impl Evented for UsbFs {
 macro_rules! ioctl_read_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
         $(#[$attr])*
-        pub unsafe fn $name(fd: $crate::libc::c_int,
+        pub unsafe fn $name(fd: nix::libc::c_int,
                             data: *const $ty)
-                            -> $crate::Result<$crate::libc::c_int> {
-            convert_ioctl_res!($crate::libc::ioctl(fd, request_code_read!($ioty, $nr, ::std::mem::size_of::<$ty>()) as $crate::sys::ioctl::ioctl_num_type, data))
+                            -> nix::Result<nix::libc::c_int> {
+            convert_ioctl_res!(nix::libc::ioctl(fd, request_code_read!($ioty, $nr, ::std::mem::size_of::<$ty>()) as nix::sys::ioctl::ioctl_num_type, data))
         }
     )
 }
@@ -104,10 +104,10 @@ macro_rules! ioctl_read_ptr {
 macro_rules! ioctl_readwrite_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
         $(#[$attr])*
-            pub unsafe fn $name(fd: $crate::libc::c_int,
+            pub unsafe fn $name(fd: nix::libc::c_int,
                                 data: *mut $ty)
-                                -> $crate::Result<$crate::libc::c_int> {
-                                    convert_ioctl_res!($crate::libc::ioctl(fd, request_code_readwrite!($ioty, $nr, ::std::mem::size_of::<$ty>()) as $crate::sys::ioctl::ioctl_num_type, data))
+                                -> nix::Result<nix::libc::c_int> {
+                                    convert_ioctl_res!(nix::libc::ioctl(fd, request_code_readwrite!($ioty, $nr, ::std::mem::size_of::<$ty>()) as nix::sys::ioctl::ioctl_num_type, data))
             }
     )
 }
@@ -329,10 +329,9 @@ pub trait UsbTransfer<T> {
 }
 
 pub trait UsbCoreTransfer<T> {
-    fn new_bulk(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
-    fn new_interrupt(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
-    fn new_isochronous(&mut self, ep: u8, size: usize) -> Result<T, nix::Error>;
-    // Feels awkward need to rethink
+    fn new_bulk(&mut self, ep: u8, size: usize) -> io::Result<T>;
+    fn new_interrupt(&mut self, ep: u8, size: usize) -> io::Result<T>;
+    fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<T>;
 }
 
 impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
@@ -346,28 +345,28 @@ impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
 }
 
 impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
-    fn new_bulk(&mut self, ep: u8, size: usize) -> Result<UsbFsUrb, nix::Error> {
+    fn new_bulk(&mut self, ep: u8, size: usize) -> io::Result<UsbFsUrb> {
         let ptr = self.mmap(size)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_BULK, ep, ptr, size))
     }
 
-    fn new_interrupt(&mut self, ep: u8, size: usize) -> Result<UsbFsUrb, nix::Error> {
+    fn new_interrupt(&mut self, ep: u8, size: usize) -> io::Result<UsbFsUrb> {
         let ptr = self.mmap(size)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, size))
     }
 
-    fn new_isochronous(&mut self, ep: u8, size: usize) -> Result<UsbFsUrb, nix::Error> {
+    fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<UsbFsUrb> {
         let ptr = self.mmap(size)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, size))
     }
 }
 
 impl UsbFs {
-    pub fn from_device(device: &UsbDevice) -> Result<UsbFs, io::Error> {
+    pub fn from_device(device: &UsbDevice) -> io::Result<UsbFs> {
         UsbFs::from_bus_device(device.bus_num, device.dev_num)
     }
 
-    pub fn from_bus_device_read_only(bus: u8, dev: u8) -> Result<UsbFs, io::Error> {
+    pub fn from_bus_device_read_only(bus: u8, dev: u8) -> io::Result<UsbFs> {
         let mut res = UsbFs {
             handle: OpenOptions::new()
                 .read(true)
@@ -386,7 +385,7 @@ impl UsbFs {
         Ok(res)
     }
 
-    pub fn from_bus_device(bus: u8, dev: u8) -> Result<UsbFs, io::Error> {
+    pub fn from_bus_device(bus: u8, dev: u8) -> io::Result<UsbFs> {
         let mut res = UsbFs {
             handle: OpenOptions::new()
                 .read(true)
@@ -409,9 +408,12 @@ impl UsbFs {
         &self.handle
     }
 
-    pub fn reset(&mut self) -> Result<(), nix::Error> {
-        unsafe { usb_reset(self.handle.as_raw_fd()) }?;
-        Ok(())
+    pub fn reset(&mut self) -> io::Result<()> {
+        let res = unsafe { usb_reset(self.handle.as_raw_fd()) };
+        match res {
+            Err(_) => Err(io::Error::last_os_error()),
+            Ok(_) => Ok(()),
+        }
     }
 
     pub fn descriptors(&mut self) -> &Option<UsbDevice> {
@@ -427,14 +429,14 @@ impl UsbFs {
         self.descriptors.take()
     }
 
-    pub fn capabilities(&mut self) -> Result<u32, nix::Error> {
+    pub fn capabilities(&mut self) -> io::Result<u32> {
         if self.capabilities != 0 {
             return Ok(self.capabilities);
         }
 
         let res = unsafe { usb_get_capabilities(self.handle.as_raw_fd(), &mut self.capabilities) };
         if res != Ok(0) {
-            return Err(nix::Error::Sys(nix::errno::Errno::last()));
+            return Err(io::Error::last_os_error());
         }
 
         Ok(self.capabilities)
@@ -446,10 +448,11 @@ impl UsbFs {
     /// let mut urb = usb.new_bulk(1, 64);
     /// let urb = usb.async_response()
     /// ```
-    pub fn async_response(&mut self) -> Result<UsbFsUrb, nix::Error> {
+    pub fn async_response(&mut self) -> io::Result<UsbFsUrb> {
         let urb: *mut UsbFsUrb = ptr::null_mut();
         let urb = unsafe {
-            usb_reapurbndelay(self.handle.as_raw_fd(), &urb)?;
+            let res = usb_reapurbndelay(self.handle.as_raw_fd(), &urb)
+                .map_err(|_| io::Error::last_os_error())?;
             &*urb
         };
         let surb = match self.urbs.remove(&urb.endpoint) {
@@ -478,7 +481,7 @@ impl UsbFs {
     /// usb.claim_interface(1)
     /// ```
     ///
-    pub fn claim_interface(&mut self, interface: u32) -> Result<(), nix::Error> {
+    pub fn claim_interface(&mut self, interface: u32) -> io::Result<()> {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         if res.is_ok() {
@@ -489,20 +492,23 @@ impl UsbFs {
                 disconnect.interface = interface as i32;
                 // Disconnect driver
                 disconnect.code = request_code_none!(b'U', 22) as i32;
-                unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }?;
+                unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }
+                    .map_err(|_| io::Error::last_os_error())?;
             }
         }
-        unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }?;
+        unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }
+            .map_err(|_| io::Error::last_os_error())?;
         self.claims.push(interface);
         Ok(())
     }
 
-    pub fn set_interface(&mut self, interface: u32, alt_setting: u32) -> Result<(), nix::Error> {
+    pub fn set_interface(&mut self, interface: u32, alt_setting: u32) -> io::Result<()> {
         let setter = UsbFsSetInterface {
             interface,
             alt_setting,
         };
-        unsafe { usb_set_interface(self.handle.as_raw_fd(), &setter) }?;
+        unsafe { usb_set_interface(self.handle.as_raw_fd(), &setter) }
+            .map_err(|_| io::Error::last_os_error())?;
         Ok(())
     }
 
@@ -517,8 +523,9 @@ impl UsbFs {
     /// usb.release_interface(1)
     /// ```
     ///
-    pub fn release_interface(&self, interface: u32) -> Result<(), nix::Error> {
-        unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) }?;
+    pub fn release_interface(&self, interface: u32) -> io::Result<()> {
+        unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) }
+            .map_err(|_| io::Error::last_os_error())?;
         Ok(())
     }
 
@@ -533,14 +540,14 @@ impl UsbFs {
     /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, None, 1000);
     /// ```
     ///
-    pub fn control(&mut self, ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
+    pub fn control(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
         self.control_async_wait(ctrl)
     }
 
     ///
     /// Blocked bulk read
     /// Consider use @async_transfer() instead.
-    pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> Result<u32, nix::Error> {
+    pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> io::Result<u32> {
         self.bulk(
             0x80 | ep,
             mem.as_mut_ptr() as *mut libc::c_void,
@@ -550,7 +557,7 @@ impl UsbFs {
 
     /// Blocked bulk write
     /// consider use @async_transfer() instead
-    pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> Result<u32, nix::Error> {
+    pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> io::Result<u32> {
         self.bulk(
             ep & 0x7F,
             mem.as_ptr() as *mut libc::c_void,
@@ -558,7 +565,7 @@ impl UsbFs {
         )
     }
 
-    fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> Result<u32, nix::Error> {
+    fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> io::Result<u32> {
         let mut bulk = BulkTransfer {
             ep: ep as u32,
             length,
@@ -566,11 +573,15 @@ impl UsbFs {
             data: mem,
         };
 
-        let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &mut bulk) }?;
+        let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &mut bulk) }
+            .map_err(|_| io::Error::last_os_error())?;
         // Note! ioctl return -1 on IO error...
         if res < 0 {
             eprintln!("Bulk endpoint: {:02X} error cause {:?}", ep, res);
-            return Err(nix::Error::last());
+            // This is fucking anoying there must be better way do this
+            return Err(io::Error::from_raw_os_error(
+                nix::Error::last().as_errno().unwrap() as i32,
+            ));
         }
         Ok(res as u32)
     }
@@ -620,7 +631,7 @@ impl UsbFs {
         }
     }
 
-    fn mmap(&mut self, length: usize) -> Result<*mut u8, Error> {
+    fn mmap(&mut self, length: usize) -> io::Result<*mut u8> {
         let mut ptr = unsafe {
             libc::mmap(
                 ptr::null_mut(),
@@ -636,7 +647,9 @@ impl UsbFs {
             // if mmap fail we try malloc instead
             ptr = unsafe { libc::calloc(1, length) as *mut u8 };
             if ptr.is_null() {
-                return Err(nix::Error::Sys(nix::errno::Errno::ENOMEM));
+                return Err(io::Error::from_raw_os_error(
+                    nix::errno::Errno::ENOMEM as i32,
+                ));
             }
         }
         Ok(ptr)
@@ -670,13 +683,14 @@ impl UsbFs {
 
     /// Send a async transfer
     /// It is up to the enduser to poll the file descriptor for a result.
-    pub fn async_transfer(&mut self, urb: UsbFsUrb) -> Result<i32, nix::Error> {
-        let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }?;
+    pub fn async_transfer(&mut self, urb: UsbFsUrb) -> io::Result<i32> {
+        let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }
+            .map_err(|_| io::Error::last_os_error())?;
         self.urbs.insert(urb.endpoint, urb);
         Ok(res)
     }
 
-    pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> Result<Vec<u8>, nix::Error> {
+    pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
         let mut timeout = ctrl.timeout;
         let asc = UsbFsUrb::from((0, ctrl));
         self.async_transfer(asc)?;
@@ -686,9 +700,9 @@ impl UsbFs {
         }
         loop {
             match self.async_response() {
-                Err(nix::Error::Sys(e)) if e == nix::errno::Errno::EAGAIN => {
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     if timeout == 0 {
-                        return Err(nix::Error::Sys(e));
+                        return Err(e.into());
                     }
                     timeout -= 1;
                     std::thread::sleep(std::time::Duration::from_millis(1));
