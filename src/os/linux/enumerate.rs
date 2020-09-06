@@ -1,4 +1,4 @@
-use crate::{UsbCore, UsbDevice};
+use crate::UsbDevice;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::io::{Error, ErrorKind};
@@ -33,21 +33,6 @@ impl UsbEnumerate {
         Ok(SysFs::usb_devices()
             .map_err(|e| Error::new(ErrorKind::Other, e))?
             .try_into()?)
-    }
-
-    fn add_device(&mut self, bus: u8, dev: u8) -> Result<(), std::io::Error> {
-        // Try open read/write if fail try read
-        let core = UsbCore::from_bus_device(bus, dev);
-        let mut core = match core {
-            Ok(core) => core,
-            Err(_) => UsbCore::from_bus_device_read_only(bus, dev)?,
-        };
-
-        if let Some(dev) = core.take_descriptors() {
-            let bus_address = format!("{}-{}", dev.bus_num, dev.dev_num);
-            self.devices.insert(bus_address, dev);
-        }
-        Ok(())
     }
 
     pub fn devices(&self) -> &HashMap<String, UsbDevice> {
