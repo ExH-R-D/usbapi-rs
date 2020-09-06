@@ -1,7 +1,5 @@
+use super::constants::*;
 use crate::UsbDevice;
-use mio::event::Evented;
-use mio::unix::EventedFd;
-use mio::{Poll, PollOpt, Ready, Token};
 use nix::*;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -11,83 +9,6 @@ use std::io;
 use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::ptr;
-//use std::result::Result;
-
-#[allow(dead_code)]
-const USBFS_CAP_ZERO_PACKET: u8 = 0x01;
-#[allow(dead_code)]
-const USBFS_CAP_BULK_CONTINUATION: u8 = 0x02;
-#[allow(dead_code)]
-const USBFS_CAP_NO_PACKET_SIZE_LIM: u8 = 0x04;
-#[allow(dead_code)]
-const USBFS_CAP_BULK_SCATTER_GATHER: u8 = 0x08;
-#[allow(dead_code)]
-const USBFS_CAP_REAP_AFTER_DISCONNECT: u8 = 0x10;
-#[allow(dead_code)]
-const USBFS_CAP_MMAP: u8 = 0x20;
-#[allow(dead_code)]
-const USBFS_CAP_DROP_PRIVILEGES: u8 = 0x40;
-
-const USBFS_URB_TYPE_ISO: u8 = 0;
-const USBFS_URB_TYPE_INTERRUPT: u8 = 1;
-#[allow(dead_code)]
-const USBFS_URB_TYPE_CONTROL: u8 = 2;
-const USBFS_URB_TYPE_BULK: u8 = 3;
-
-#[allow(dead_code)]
-const USBFS_URB_FLAGS_SHORT_NOT_OK: u32 = 0x01;
-#[allow(dead_code)]
-const USBFS_URB_FLAGS_ISO_ASAP: u32 = 0x02;
-#[allow(dead_code)]
-const USBFS_URB_FLAGS_BULK_CONTINUATION: u32 = 0x04;
-#[allow(dead_code)]
-const USBFS_URB_FLAGS_ZERO_PACKET: u32 = 0x40;
-#[allow(dead_code)]
-const USBFS_URB_FLAGS_NO_INTERRUPT: u32 = 0x80;
-
-#[allow(dead_code)]
-pub const RECIPIENT_DEVICE: u8 = 0x00;
-#[allow(dead_code)]
-pub const RECIPIENT_INTERFACE: u8 = 0x01;
-#[allow(dead_code)]
-pub const RECIPIENT_ENDPOINT: u8 = 0x02;
-#[allow(dead_code)]
-pub const RECIPIENT_OTHER: u8 = 0x03;
-#[allow(dead_code)]
-pub const REQUEST_TYPE_STANDARD: u8 = 0x00 << 5;
-#[allow(dead_code)]
-pub const REQUEST_TYPE_CLASS: u8 = 0x01 << 5;
-#[allow(dead_code)]
-pub const ENDPOINT_IN: u8 = 0x80;
-#[allow(dead_code)]
-pub const ENDPOINT_OUT: u8 = 0x00;
-
-impl Evented for UsbFs {
-    fn register(
-        &self,
-        poll: &Poll,
-        token: Token,
-        interest: Ready,
-        opts: PollOpt,
-    ) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).register(poll, token, interest, opts)
-    }
-
-    fn reregister(
-        &self,
-        poll: &Poll,
-        token: Token,
-        interest: Ready,
-        opts: PollOpt,
-    ) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).reregister(poll, token, interest, opts)
-    }
-
-    fn deregister(&self, poll: &Poll) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).deregister(poll)
-    }
-}
-
 #[macro_export]
 macro_rules! ioctl_read_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
@@ -208,7 +129,7 @@ pub struct BulkTransfer {
 }
 
 pub struct UsbFs {
-    handle: std::fs::File,
+    pub(crate) handle: std::fs::File,
     claims: Vec<u32>,
     capabilities: u32,
     urbs: HashMap<u8, UsbFsUrb>,
@@ -425,6 +346,7 @@ impl UsbFs {
     }
 
     /// This avoid copy used by enumerator
+    #[allow(dead_code)]
     pub(crate) fn take_descriptors(&mut self) -> Option<UsbDevice> {
         self.descriptors.take()
     }
@@ -451,7 +373,7 @@ impl UsbFs {
     pub fn async_response(&mut self) -> io::Result<UsbFsUrb> {
         let urb: *mut UsbFsUrb = ptr::null_mut();
         let urb = unsafe {
-            let res = usb_reapurbndelay(self.handle.as_raw_fd(), &urb)
+            let _ = usb_reapurbndelay(self.handle.as_raw_fd(), &urb)
                 .map_err(|_| io::Error::last_os_error())?;
             &*urb
         };
@@ -485,13 +407,22 @@ impl UsbFs {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         if res.is_ok() {
-            let driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
+            // FIXME wierd hackish mess
+            let raw_driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
+            // we need to clone it
+            let driver_name = raw_driver_name.clone();
+            // convert it
             let driver_name = driver_name.to_str().unwrap_or("");
+            // and forget not free the original
+            std::mem::forget(raw_driver_name);
             if driver_name != "usbfs" {
-                let mut disconnect: UsbFsIoctl = unsafe { mem::zeroed() };
-                disconnect.interface = interface as i32;
+                log::debug!("Not a usbfs device we need to unload kernel module if possible");
+                let mut disconnect = UsbFsIoctl {
+                    interface: 0,
+                    code: request_code_none!(b'U', 22) as i32,
+                    data: ptr::null_mut(),
+                };
                 // Disconnect driver
-                disconnect.code = request_code_none!(b'U', 22) as i32;
                 unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }
                     .map_err(|_| io::Error::last_os_error())?;
             }

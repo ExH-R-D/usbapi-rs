@@ -1,6 +1,8 @@
 pub mod descriptors;
 pub mod os;
 #[cfg(target_os = "linux")]
+pub use os::linux::constants::*;
+#[cfg(target_os = "linux")]
 pub use os::linux::enumerate::UsbEnumerate;
 #[cfg(target_os = "linux")]
 pub use os::linux::usb_device::UsbDevice;

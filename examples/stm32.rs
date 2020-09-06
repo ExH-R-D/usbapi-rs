@@ -1,3 +1,5 @@
+/// This example is ugly
+/// For more see: https://gitlab.com/mike7b4/dfuflash
 use mio::{Evented, Events, Poll, PollOpt, Ready, Token};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -39,10 +41,10 @@ fn main() -> Result<(), std::io::Error> {
 
             let mut mem: [u8; 64] = [0; 64];
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
-            println!("1 {} data {:?}", len, &mem[0..len as usize]);
-            assert!(len > 0);
+            println!("Read once to check if there where some garbage");
+            println!("1 {} received data {:?}", len, &mem[0..len as usize]);
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
-            println!("2 {} data: {:?}", len, &mem[0..len as usize]);
+            println!("2 {} received data: {:?}", len, &mem[0..len as usize]);
             assert!(len == 0);
             let len = usb.bulk_write(1, "$".to_string().as_bytes()).unwrap_or(0);
             assert!(len == 1);
@@ -50,7 +52,7 @@ fn main() -> Result<(), std::io::Error> {
             let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
             assert!(len > 0);
             println!(
-                "3 As string: {}",
+                "3 Received data try stringify: {}",
                 String::from_utf8_lossy(&mem[0..len as usize])
             );
 
