@@ -6,6 +6,8 @@ keywords = ["usb", "usbcore", "hardware"]
 edition="2018"
 description = "Access USB from Rust"
 license = "MIT"
+homepage = "https://gitlab.com/mike7b4/usbapi-rs"
+repository = "https://gitlab.com/mike7b4/usbapi-rs.git"
 readme = "readme.md"
 
 [dependencies]
