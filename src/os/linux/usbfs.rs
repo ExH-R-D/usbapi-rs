@@ -187,15 +187,8 @@ impl UsbFsUrb {
         }
     }
 
-    pub fn buffer_as_ref<'a>(&self) -> &'a [u8] {
-        if self.buffer_length == 0 {
-            return &[];
-        }
-        unsafe { std::slice::from_raw_parts_mut(self.buffer, self.buffer_length as usize) }
-    }
-
     pub fn control_data_as_ref<'a>(&self) -> &'a [u8] {
-        let b = self.buffer_as_ref();
+        let b = self.buffer_from_raw();
         if b.len() < 8 {
             return &[];
         }
@@ -255,8 +248,7 @@ impl fmt::Display for UsbFsUrb {
     }
 }
 
-// EXPERIMENTAL FIXME error should not be nix::Error
-// Also it should be put in another file...
+// should be put in another file outside os?...
 pub trait UsbTransfer<T> {
     fn buffer_from_raw_mut<'a>(&self) -> &'a mut [u8];
     fn buffer_from_raw<'a>(&self) -> &'a [u8];
@@ -274,7 +266,14 @@ impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
     }
 
     fn buffer_from_raw<'a>(&self) -> &'a [u8] {
-        unsafe { std::slice::from_raw_parts(self.buffer, self.buffer_length as usize) }
+        unsafe {
+            if (self.endpoint & ENDPOINT_IN) == ENDPOINT_IN {
+                println!("IN {} {:02X?}", self.actual_length, self.buffer);
+                std::slice::from_raw_parts_mut(self.buffer, self.actual_length as usize)
+            } else {
+                std::slice::from_raw_parts_mut(self.buffer, self.buffer_length as usize)
+            }
+        }
     }
 }
 
@@ -300,6 +299,7 @@ impl UsbFs {
         UsbFs::from_bus_device(device.bus_num, device.dev_num)
     }
 
+    /// This is used when read file descriptor strings.
     pub fn from_bus_device_read_only(bus: u8, dev: u8) -> io::Result<UsbFs> {
         let mut res = UsbFs {
             handle: OpenOptions::new()
@@ -383,6 +383,7 @@ impl UsbFs {
     /// let mut urb = usb.new_bulk(1, 64);
     /// let urb = usb.async_response()
     /// ```
+    /// The returned urb can be reused
     pub fn async_response(&mut self) -> io::Result<UsbFsUrb> {
         let urb: *mut UsbFsUrb = ptr::null_mut();
         let urb = unsafe {
@@ -530,7 +531,6 @@ impl UsbFs {
         Ok(res as u32)
     }
 
-    //    #[allow(clippy::cast_ptr_alignment)]
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
         self.get_descriptor_string_iface(0, id)
     }
@@ -576,7 +576,7 @@ impl UsbFs {
     }
 
     fn mmap(&mut self, length: usize) -> io::Result<*mut u8> {
-        let mut ptr = unsafe {
+        let ptr = unsafe {
             libc::mmap(
                 ptr::null_mut(),
                 length as libc::size_t,
@@ -616,7 +616,7 @@ impl UsbFs {
             match self.async_response() {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     if timeout == 0 {
-                        return Err(e.into());
+                        return Err(e);
                     }
                     timeout -= 1;
                     std::thread::sleep(std::time::Duration::from_millis(1));
@@ -638,7 +638,6 @@ impl UsbFs {
 
 impl Drop for UsbFs {
     fn drop(&mut self) {
-        //log::debug!("UsbCore dropped: {:?}", self.descriptors);
         for claim in &self.claims {
             if self.release_interface(*claim).is_ok() {};
         }

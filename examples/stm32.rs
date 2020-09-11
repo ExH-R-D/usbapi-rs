@@ -5,6 +5,68 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use usbapi::*;
+const SYNC_BYTE: u8 = 250;
+const BULK_IN: u8 = 0x81;
+const BULK_OUT: u8 = 0x1;
+
+fn block_transfer(usb: &mut UsbCore) -> Result<(), std::io::Error> {
+    let mut mem: [u8; 64] = [0; 64];
+    let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
+    println!("Read once to check if there where some garbage");
+    println!("1 {} received data {:?}", len, &mem[0..len as usize]);
+    let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
+    println!("2 {} received data: {:?}", len, &mem[0..len as usize]);
+    assert!(len == 0);
+    let len = usb.bulk_write(1, "$".to_string().as_bytes()).unwrap_or(0);
+    assert!(len == 1);
+    println!("1 {} sent data", len);
+    let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
+    assert!(len > 0);
+    println!(
+        "3 Received data try stringify: {}",
+        String::from_utf8_lossy(&mem[0..len as usize])
+    );
+    Ok(())
+}
+
+fn poll_send(poll: &Poll, usb: &mut UsbCore) -> Result<(), std::io::Error> {
+    let mut events = Events::with_capacity(1);
+    let mut urbtx = usb.new_bulk(BULK_OUT, 1)?;
+    let slice = urbtx.buffer_from_raw_mut();
+    slice[0] = SYNC_BYTE;
+    println!("=== urbtx before poll ====\n{}", urbtx);
+    usb.async_transfer(urbtx)?;
+    if poll.poll(&mut events, Some(Duration::from_millis(100)))? == 0 {
+        panic!("Poll did not return anything");
+    }
+    urbtx = usb.async_response()?;
+    println!("=== urb tx after poll ===\n{}", urbtx);
+    Ok(())
+}
+
+fn poll_transfer(terminate: Arc<AtomicBool>, usb: &mut UsbCore) -> Result<(), std::io::Error> {
+    let poll = Poll::new().unwrap();
+    let mut events = Events::with_capacity(1);
+    usb.register(&poll, Token(0), Ready::writable(), PollOpt::edge())?;
+
+    poll_send(&poll, usb)?;
+    // send one byte
+    let mut urbrx = usb.new_bulk(BULK_IN, 64)?;
+    usb.async_transfer(urbrx).unwrap_or(0);
+    while !terminate.load(Ordering::Relaxed) {
+        poll.poll(&mut events, Some(Duration::from_millis(100)))?;
+        for e in &events {
+            println!("got event: {:?}", e);
+            urbrx = usb.async_response().unwrap();
+            println!("=== urb rx after poll ===\n{}", urbrx);
+            println!("Got bytes:\n{:02X?}", urbrx.buffer_from_raw());
+            //poll_send(&poll, usb);
+            usb.async_transfer(urbrx).unwrap_or(0);
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), std::io::Error> {
     let term = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGQUIT, Arc::clone(&term)).unwrap();
@@ -15,10 +77,8 @@ fn main() -> Result<(), std::io::Error> {
 
     for (_bus_address, device) in usb.devices() {
         if device.device.id_vendor == 0x483 && device.device.id_product == 0x5740 {
+            println!("Found one STM32 device. (Note if there  is more than one STM connected to the host the rest will be ignored.");
             let mut usb = UsbCore::from_device(&device).expect("Could not open device");
-            let poll = Poll::new().unwrap();
-            usb.register(&poll, Token(0), Ready::writable(), PollOpt::edge())?;
-
             println!("Capabilities: 0x{:02X?}", usb.capabilities());
             let _ = usb.claim_interface(0).is_ok();
             println!(
@@ -39,70 +99,13 @@ fn main() -> Result<(), std::io::Error> {
                 Err(err) => println!("Send bytes to control failed {}", err),
             };
 
-            let mut mem: [u8; 64] = [0; 64];
-            let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
-            println!("Read once to check if there where some garbage");
-            println!("1 {} received data {:?}", len, &mem[0..len as usize]);
-            let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
-            println!("2 {} received data: {:?}", len, &mem[0..len as usize]);
-            assert!(len == 0);
-            let len = usb.bulk_write(1, "$".to_string().as_bytes()).unwrap_or(0);
-            assert!(len == 1);
-            println!("1 {} sent data", len);
-            let len = usb.bulk_read(1, &mut mem).unwrap_or(0);
-            assert!(len > 0);
-            println!(
-                "3 Received data try stringify: {}",
-                String::from_utf8_lossy(&mem[0..len as usize])
-            );
+            block_transfer(&mut usb)?;
 
-            let urb = usb.new_bulk(0x1, 1).unwrap();
-            let slice = urb.buffer_from_raw_mut();
-            println!("New URB {}", urb);
-            slice[0] = '$' as u8;
-            let len = usb.async_transfer(urb).unwrap_or(0);
-            // Async return 0 in case of success
-            println!("length {}", len);
-            assert!(len == 0);
-            println!("2 {} sent data", len);
-            let mut events = Events::with_capacity(16);
-            let mut run = true;
-            while run {
-                poll.poll(&mut events, Some(Duration::from_millis(100)))
-                    .unwrap_or(0);
-                for e in &events {
-                    println!("eventif: {:?}", e);
-                    let urb = usb.async_response().unwrap();
-                    println!("{}", urb);
-                    // Read
-                    let rxurb = usb.new_bulk(0x81, 64).unwrap();
-                    usb.async_transfer(rxurb).unwrap_or(0);
-                    run = false;
-                }
-                // TODO setup a thread to talk to STM via http
-                if term.load(Ordering::Relaxed) {
-                    break;
-                }
-                //                thread::sleep(Duration::from_millis(100));
-            }
-            loop {
-                poll.poll(&mut events, Some(Duration::from_millis(100)))?;
-                for _e in &events {
-                    let resp = usb.async_response().unwrap();
-                    println!("Urb Response on a read {}", resp);
-                    let slice = resp.buffer_from_raw();
-                    println!("got string: {}", String::from_utf8_lossy(&slice));
-                    let rxurb = usb.new_bulk(0x81, 64).unwrap();
-                    usb.async_transfer(rxurb).unwrap_or(0);
-                }
-                if term.load(Ordering::Relaxed) {
-                    break;
-                }
-            }
+            poll_transfer(term.clone(), &mut usb)?;
             break;
         }
     }
 
-    println!("Drop dead");
+    println!("Exited succefully");
     Ok(())
 }
