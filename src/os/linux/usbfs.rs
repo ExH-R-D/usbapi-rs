@@ -203,6 +203,19 @@ impl UsbFsUrb {
     }
 }
 
+impl Drop for UsbFsUrb {
+    fn drop(&mut self) {
+        if !self.usercontext.is_null() {
+            unsafe {
+                libc::munmap(
+                    self.usercontext as *mut libc::c_void,
+                    self.buffer_length as usize,
+                );
+            }
+        }
+    }
+}
+
 impl From<(u8, ControlTransfer)> for UsbFsUrb {
     fn from((ep, ctl): (u8, ControlTransfer)) -> Self {
         let mut v: Vec<u8> = Vec::new();
@@ -384,7 +397,7 @@ impl UsbFs {
                 u
             }
             None => {
-                eprintln!("EP: {} not exists in hashmap?", urb.endpoint);
+                log::error!("EP: {} not exists in hashmap?", urb.endpoint);
                 UsbFsUrb::new(0xFF, urb.endpoint, ptr::null_mut(), 0)
             }
         };
@@ -575,42 +588,12 @@ impl UsbFs {
         } as *mut u8;
 
         if ptr.is_null() {
-            // if mmap fail we try malloc instead
-            ptr = unsafe { libc::calloc(1, length) as *mut u8 };
-            if ptr.is_null() {
-                return Err(io::Error::from_raw_os_error(
-                    nix::errno::Errno::ENOMEM as i32,
-                ));
-            }
+            return Err(io::Error::from_raw_os_error(
+                nix::errno::Errno::ENOMEM as i32,
+            ));
         }
         Ok(ptr)
     }
-
-    /*
-       /// Setup a new bulk package for async send or recieve
-       /// * `ep` Endpoint
-       /// * `length` max length
-       /// * Returns UsbFsUrb with malloc'ed transfer buffer.
-       pub fn new_bulk(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
-           let ptr = self.mmap(length)?;
-           let mut urb = UsbFsUrb::new_bulk(ep, length)?;
-           urb.buffer = ptr as *mut libc::c_void
-    ;
-           Ok(urb)
-       }
-
-       /// Untested
-       pub fn new_isochronous(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
-           let ptr = self.mmap(length)?;
-           Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, length))
-       }
-
-       /// Untested
-       pub fn new_interrupt(&mut self, ep: u8, length: usize) -> Result<UsbFsUrb, nix::Error> {
-           let ptr = self.mmap(length)?;
-           Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, length))
-       }
-       */
 
     /// Send a async transfer
     /// It is up to the enduser to poll the file descriptor for a result.
