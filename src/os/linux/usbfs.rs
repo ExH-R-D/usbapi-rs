@@ -199,6 +199,7 @@ impl UsbFsUrb {
 impl Drop for UsbFsUrb {
     fn drop(&mut self) {
         if !self.usercontext.is_null() {
+            println!("munmap {:X?}", self.usercontext);
             unsafe {
                 libc::munmap(
                     self.usercontext as *mut libc::c_void,
@@ -211,6 +212,7 @@ impl Drop for UsbFsUrb {
 
 impl From<(u8, ControlTransfer)> for UsbFsUrb {
     fn from((ep, ctl): (u8, ControlTransfer)) -> Self {
+        // FIXMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
         let mut v: Vec<u8> = Vec::new();
         v.push(ctl.request_type);
         v.push(ctl.request);
@@ -227,6 +229,7 @@ impl From<(u8, ControlTransfer)> for UsbFsUrb {
 
         let p = v.as_mut_ptr();
         std::mem::forget(v);
+        println!("aloc {:X?}", p);
 
         Self::new(USBFS_URB_TYPE_CONTROL, ep, p, length)
     }
