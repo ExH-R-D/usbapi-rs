@@ -514,7 +514,7 @@ impl UsbFs {
         let mut bulk = BulkTransfer {
             ep: ep as u32,
             length,
-            timeout: 10,
+            timeout: 1,
             data: mem,
         };
 
@@ -539,7 +539,7 @@ impl UsbFs {
         if self.read_only {
             return "".into();
         }
-        let vec = vec![0 as u8; 1024];
+        let vec = vec![0; 1024];
         match self.control(ControlTransfer::new(
             0x80,
             0x06,
@@ -583,7 +583,7 @@ impl UsbFs {
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_SHARED,
                 self.handle.as_raw_fd(),
-                0 as libc::off_t,
+                0,
             )
         } as *mut u8;
 
