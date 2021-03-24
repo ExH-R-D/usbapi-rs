@@ -210,6 +210,8 @@ impl Drop for UsbFsUrb {
     }
 }
 
+/*
+#[deprecated(since = "0.2.3", note = "Use new_control instead")]
 impl From<(u8, ControlTransfer)> for UsbFsUrb {
     fn from((ep, ctl): (u8, ControlTransfer)) -> Self {
         // FIXMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
@@ -234,6 +236,7 @@ impl From<(u8, ControlTransfer)> for UsbFsUrb {
         Self::new(USBFS_URB_TYPE_CONTROL, ep, p, length)
     }
 }
+*/
 
 impl fmt::Display for UsbFsUrb {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -261,6 +264,7 @@ pub trait UsbCoreTransfer<T> {
     fn new_bulk(&mut self, ep: u8, size: usize) -> io::Result<T>;
     fn new_interrupt(&mut self, ep: u8, size: usize) -> io::Result<T>;
     fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<T>;
+    fn new_control(&mut self, ep: u8, ctl: ControlTransfer) -> io::Result<T>;
 }
 
 impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
@@ -294,6 +298,29 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
     fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<UsbFsUrb> {
         let ptr = self.mmap(size)?;
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, size))
+    }
+
+    fn new_control(&mut self, ep: u8, ctl: ControlTransfer) -> io::Result<UsbFsUrb> {
+        let length = mem::size_of::<ControlTransfer>() + ctl.length as usize;
+        let p = self.mmap(length)?;
+        unsafe {
+            *p.add(0) = ctl.request_type;
+            *p.add(1) = ctl.request;
+            *p.add(2) = (ctl.value & 0x00FF) as u8;
+            *p.add(3) = (ctl.value >> 8) as u8;
+            *p.add(3) = (ctl.index & 0x00FF) as u8;
+            *p.add(4) = (ctl.index >> 8) as u8;
+            *p.add(5) = (ctl.length & 0x00FF) as u8;
+            *p.add(6) = (ctl.length >> 8) as u8;
+        }
+
+        for (i, byte) in ctl.get_slice().iter().enumerate() {
+            unsafe {
+                *p.add(i + 7) = *byte;
+            }
+        }
+
+        Ok(UsbFsUrb::new(USBFS_URB_TYPE_CONTROL, ep, p, length))
     }
 }
 
@@ -609,7 +636,7 @@ impl UsbFs {
 
     pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
         let mut timeout = ctrl.timeout;
-        let asc = UsbFsUrb::from((0, ctrl));
+        let asc = self.new_control(0, ctrl)?;
         self.async_transfer(asc)?;
         let urb: UsbFsUrb;
         if timeout == 0 {
