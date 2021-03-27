@@ -411,7 +411,7 @@ impl UsbFs {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         if res.is_ok() {
-            panic!("FIXME the unload drivers API is broken and need to be fixed");
+            panic!("FIXME the unload driver API is broken and need to be fixed");
         }
         mem::drop(driver);
         unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }
