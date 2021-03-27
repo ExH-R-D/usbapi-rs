@@ -1,13 +1,20 @@
 use super::constants::*;
+use crate::control_transfer::ControlTransfer;
 use crate::UsbDevice;
 use nix::*;
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::fmt;
 use std::fs::OpenOptions;
 use std::io;
+use std::io::{Error, ErrorKind};
 use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::ptr;
+use std::time::{Duration, Instant};
+
+const CONTROL_MAX_PACKET_SIZE: u16 = 1024;
+const CONTROL_MAX_PACKET_SIZE_WITH_HEADER: u16 = CONTROL_MAX_PACKET_SIZE + 8;
 #[macro_export]
 macro_rules! ioctl_read_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
@@ -65,41 +72,6 @@ union UrbUnion {
     stream_id: u32,
 }
 
-#[derive(Clone, Debug)]
-pub struct ControlTransfer {
-    request_type: u8,
-    request: u8,
-    value: u16,
-    index: u16,
-    length: u16,
-    timeout: u32,
-    data: Vec<u8>,
-}
-
-impl ControlTransfer {
-    pub fn new(
-        request_type: u8,
-        request: u8,
-        value: u16,
-        index: u16,
-        data: Option<Vec<u8>>,
-        timeout: u32,
-    ) -> Self {
-        // ugly but keep back compability for now
-        let data = data.unwrap_or_else(|| Vec::new());
-        let length = data.len() as u16;
-        ControlTransfer {
-            request_type,
-            request,
-            value,
-            index,
-            length,
-            timeout,
-            data,
-        }
-    }
-}
-
 // Sync bulk transfer
 #[derive(Debug)]
 #[repr(C)]
@@ -118,6 +90,8 @@ pub struct UsbFs {
     pub(crate) bus_dev: (u8, u8),
     descriptors: Option<UsbDevice>,
     read_only: bool,
+    // Memory map for control channel
+    map_control: *mut u8,
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -170,24 +144,12 @@ impl UsbFsUrb {
     }
 
     pub fn control_data_as_ref<'a>(&self) -> &'a [u8] {
-        let b = self.buffer_from_raw();
-        if b.len() <= 8 {
+        if self.actual_length > self.buffer_length {
+            panic!("Something is smoking actual_length > buffer_length? Please report this as a BUG ASAP");
+        } else if self.actual_length == 0 {
             return &[];
         }
-        &b[8..8 + self.actual_length as usize]
-    }
-}
-
-impl Drop for UsbFsUrb {
-    fn drop(&mut self) {
-        if !self.buffer.is_null() {
-            unsafe {
-                libc::munmap(
-                    self.buffer as *mut libc::c_void,
-                    self.buffer_length as usize,
-                );
-            };
-        }
+        &self.buffer_from_raw()[8..8 + self.actual_length as usize]
     }
 }
 
@@ -252,13 +214,22 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
         Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, size))
     }
 
-    fn new_control(&mut self, ep: u8, ctl: ControlTransfer) -> io::Result<UsbFsUrb> {
-        let length = 8 + ctl.length;
-        let p = self.mmap(length as usize)?;
-        //let p = libc::malloc(length as usize) as *mut u8;
-        //if p.is_null() {
-        //   return Err(std::io::Error::last_os_error());
-        //}
+    fn new_control(&mut self, ep: u8, mut ctl: ControlTransfer) -> io::Result<UsbFsUrb> {
+        let length = 8 + ctl.buffer_length;
+        if length > CONTROL_MAX_PACKET_SIZE_WITH_HEADER {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "Data bigger than {} is not supported on the control endpoint",
+                    CONTROL_MAX_PACKET_SIZE
+                ),
+            ));
+        }
+        let p = if self.map_control.is_null() {
+            self.mmap(CONTROL_MAX_PACKET_SIZE_WITH_HEADER as usize)?
+        } else {
+            self.map_control
+        };
         let p = unsafe {
             *p.add(0) = ctl.request_type;
             *p.add(1) = ctl.request;
@@ -266,13 +237,16 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
             *p.add(3) = (ctl.value >> 8) as u8;
             *p.add(4) = (ctl.index & 0x00FF) as u8;
             *p.add(5) = (ctl.index >> 8) as u8;
-            *p.add(6) = (ctl.length & 0x00FF) as u8;
-            *p.add(7) = (ctl.length >> 8) as u8;
+            *p.add(6) = (ctl.buffer_length & 0x00FF) as u8;
+            *p.add(7) = (ctl.buffer_length >> 8) as u8;
             p
         };
-        for (i, byte) in ctl.data.iter().enumerate() {
-            unsafe {
-                *p.add(i + 8) = *byte;
+
+        if let Some(v) = ctl.buffer.take() {
+            for (i, byte) in v.iter().enumerate() {
+                unsafe {
+                    *p.add(i + 8) = *byte;
+                }
             }
         }
         Ok(UsbFsUrb::new(
@@ -302,6 +276,7 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: true,
+            map_control: std::ptr::null_mut(),
         };
 
         res.descriptors();
@@ -321,6 +296,7 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: false,
+            map_control: std::ptr::null_mut(),
         };
 
         res.descriptors();
@@ -373,12 +349,15 @@ impl UsbFs {
     /// let mut urb = usb.new_bulk(1, 64);
     /// let urb = usb.async_response()
     /// ```
-    /// The returned urb can be reused
+    /// The returned URB can be reused
     pub fn async_response(&mut self) -> io::Result<UsbFsUrb> {
         let urb: *mut UsbFsUrb = ptr::null_mut();
         let urb = unsafe {
             let _ = usb_reapurbndelay(self.handle.as_raw_fd(), &urb)
                 .map_err(|_| io::Error::last_os_error())?;
+            if urb.is_null() {
+                panic!("urb must not be null something is buggy send bug report to usbapi-rs developer");
+            }
             &*urb
         };
         let surb = match self.urbs.remove(&urb.endpoint) {
@@ -388,8 +367,10 @@ impl UsbFs {
                 u
             }
             None => {
-                log::error!("EP: {} not exists in hashmap?", urb.endpoint);
-                UsbFsUrb::new(0xFF, urb.endpoint, ptr::null_mut(), 0)
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    format!("Endpoint: {} not exists in hashmap?", urb.endpoint),
+                ));
             }
         };
 
@@ -410,10 +391,13 @@ impl UsbFs {
     pub fn claim_interface(&mut self, interface: u32) -> io::Result<()> {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
-        if res.is_ok() {
-            panic!("FIXME the unload driver API is broken and need to be fixed");
+        if res == Ok(0) {
+            let c_str: &CStr = unsafe { CStr::from_ptr(driver.driver.as_ptr()) };
+            let name: &str = c_str.to_str().unwrap();
+            if name != "usbfs" {
+                panic!("FIXME the unload driver API is broken and need to be fixed");
+            }
         }
-        mem::drop(driver);
         unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }
             .map_err(|_| io::Error::last_os_error())?;
         self.claims.push(interface);
@@ -445,21 +429,6 @@ impl UsbFs {
         unsafe { usb_release_interface(self.handle.as_raw_fd(), &interface) }
             .map_err(|_| io::Error::last_os_error())?;
         Ok(())
-    }
-
-    /// Send control
-    ///
-    /// * `ControlTransfer` structure.
-    ///
-    /// Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// usb.control(ControlTransfer::new(0x21, 0x20, 0, 0, None, 1000);
-    /// ```
-    ///
-    pub fn control(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
-        self.control_async_wait(ctrl)
     }
 
     ///
@@ -503,24 +472,26 @@ impl UsbFs {
         Ok(res as u32)
     }
 
-    // FIXME error handling should be an result
-    pub fn get_descriptor_string(&mut self, id: u8) -> String {
+    /// Get descriptor string with id for default interface
+    pub fn get_descriptor_string(&mut self, id: u8) -> std::io::Result<String> {
         self.get_descriptor_string_iface(0, id)
     }
 
-    // FIXME error handling should be an result or an option
-    pub fn get_descriptor_string_iface(&mut self, iface: u16, id: u8) -> String {
+    /// Get descriptor string with id for interface
+    pub fn get_descriptor_string_iface(&mut self, iface: u16, id: u8) -> std::io::Result<String> {
         if self.read_only {
-            return "".into();
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Can't read descriptors since has been open as ready only",
+            ));
         }
-        let vec = vec![0; 256];
-        match self.control(ControlTransfer::new(
+        match self.control_async_wait(ControlTransfer::new_read(
             0x80,
             0x06,
             0x0300 | id as u16,
             iface,
-            Some(vec),
-            100,
+            256,
+            Duration::from_millis(100),
         )) {
             Ok(data) => {
                 let mut length = data.len();
@@ -530,23 +501,17 @@ impl UsbFs {
                         length,
                         id
                     );
-                    return "".into();
+                    return Ok("Invalid UTF16".into());
                 }
                 length /= 2;
                 let utf =
                     unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u16, length) };
-                String::from_utf16_lossy(utf)
+                Ok(String::from_utf16_lossy(utf))
             }
-            Err(e) => {
-                log::error!(
-                    "get_descriptor_string on {}-{} failed with {} on wIndex {}",
-                    self.bus_dev.0,
-                    self.bus_dev.1,
-                    e,
-                    id
-                );
-                "".to_string()
-            }
+            Err(e) => Err(Error::new(
+                ErrorKind::Other,
+                format!("Failed to get descriptor string cause: {}", e),
+            )),
         }
     }
 
@@ -573,39 +538,40 @@ impl UsbFs {
     /// Send a async transfer
     /// It is up to the enduser to poll the file descriptor for a result.
     pub fn async_transfer(&mut self, urb: UsbFsUrb) -> io::Result<i32> {
+        if self.urbs.get(&urb.endpoint).is_some() {
+            return Err(Error::new(
+                ErrorKind::AlreadyExists,
+                format!("Endpoint {} pending", urb.endpoint),
+            ));
+        }
         let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }
             .map_err(|_| io::Error::last_os_error())?;
         self.urbs.insert(urb.endpoint, urb);
         Ok(res)
     }
 
-    // FIXME use mio if feature  is enabled
     pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
-        let mut timeout = ctrl.timeout + 1;
+        let timeout = ctrl.timeout;
         let asc = self.new_control(0, ctrl)?;
         self.async_transfer(asc)?;
-        let urb: UsbFsUrb;
+        let instant = Instant::now();
         loop {
             match self.async_response() {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if timeout == 0 {
-                        return Err(e);
-                    }
-                    timeout -= 1;
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                    continue;
+                    std::thread::sleep(Duration::from_micros(10));
                 }
                 Err(e) => {
                     return Err(e);
                 }
-                Ok(d) => {
-                    urb = d;
-                    break;
+                Ok(urb) => {
+                    let data = Vec::from(urb.control_data_as_ref());
+                    return Ok(data);
                 }
             }
+            if instant.elapsed() >= timeout {
+                return Err(Error::new(ErrorKind::TimedOut, ""));
+            }
         }
-        let data = Vec::from(urb.control_data_as_ref());
-        Ok(data)
     }
 }
 
@@ -613,6 +579,15 @@ impl Drop for UsbFs {
     fn drop(&mut self) {
         for claim in &self.claims {
             if self.release_interface(*claim).is_ok() {};
+        }
+
+        if !self.map_control.is_null() {
+            unsafe {
+                libc::munmap(
+                    self.map_control as *mut libc::c_void,
+                    CONTROL_MAX_PACKET_SIZE_WITH_HEADER as usize,
+                );
+            };
         }
     }
 }

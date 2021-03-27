@@ -102,9 +102,15 @@ impl UsbDevice {
         Self::from_bytes(bytes, |mut d| {
             d.bus_num = usb.bus_dev.0;
             d.dev_num = usb.bus_dev.1;
-            d.manufacturer = usb.get_descriptor_string(d.device.imanufacturer);
-            d.product = usb.get_descriptor_string(d.device.iproduct);
-            d.serial = usb.get_descriptor_string(d.device.iserial);
+            d.manufacturer = usb
+                .get_descriptor_string(d.device.imanufacturer)
+                .unwrap_or_else(|_| String::from(""));
+            d.product = usb
+                .get_descriptor_string(d.device.iproduct)
+                .unwrap_or_else(|_| String::new());
+            d.serial = usb
+                .get_descriptor_string(d.device.iserial)
+                .unwrap_or_else(|_| String::new());
         })
     }
 }
