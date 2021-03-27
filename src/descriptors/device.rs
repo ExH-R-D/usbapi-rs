@@ -1,30 +1,36 @@
 use crate::descriptors::configuration::Configuration;
-use serde::{Deserialize, Serialize};
-use serde_hex::{SerHex, StrictPfx};
+use serde::{Serialize, Serializer};
 use std::fmt;
 use std::slice::Iter;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Debug)]
 pub struct Device {
     pub length: u8,
     pub kind: u8,
-    #[serde(with = "SerHex::<StrictPfx>")]
+    #[serde(serialize_with = "to_hex16")]
     pub bcd_usb: u16,
     pub device_class: u8,
     pub device_sub_class: u8,
     pub device_protocol: u8,
     pub max_packet_size0: u8,
-    #[serde(with = "SerHex::<StrictPfx>")]
+    #[serde(serialize_with = "to_hex16")]
     pub id_vendor: u16,
-    #[serde(with = "SerHex::<StrictPfx>")]
+    #[serde(serialize_with = "to_hex16")]
     pub id_product: u16,
-    #[serde(with = "SerHex::<StrictPfx>")]
+    #[serde(serialize_with = "to_hex16")]
     pub bcd_device: u16,
     pub imanufacturer: u8,
     pub iproduct: u8,
     pub iserial: u8,
     pub num_configurations: u8,
     pub configurations: Vec<Configuration>,
+}
+
+fn to_hex16<S>(id_vendor: &u16, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    s.serialize_str(&format!("0x{:04X}", id_vendor))
 }
 
 impl fmt::Display for Device {

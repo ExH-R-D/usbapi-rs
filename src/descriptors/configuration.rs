@@ -1,8 +1,8 @@
 use crate::descriptors::interface::Interface;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt;
 use std::slice::Iter;
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Debug)]
 pub struct Configuration {
     length: u8,
     kind: u8,

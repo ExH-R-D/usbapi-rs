@@ -1,5 +1,5 @@
 use super::constants::*;
-use crate::control_transfer::ControlTransfer;
+use crate::usb_transfer::{ControlTransfer, UsbCoreTransfer, UsbTransfer};
 use crate::UsbDevice;
 use nix::*;
 use std::collections::HashMap;
@@ -19,6 +19,8 @@ const CONTROL_MAX_PACKET_SIZE_WITH_HEADER: u16 = CONTROL_MAX_PACKET_SIZE + 8;
 macro_rules! ioctl_read_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
         $(#[$attr])*
+        /// # Safety
+        /// ioctl call need unsafe calls to C
         pub unsafe fn $name(fd: nix::libc::c_int,
                             data: *const $ty)
                             -> nix::Result<nix::libc::c_int> {
@@ -31,6 +33,8 @@ macro_rules! ioctl_read_ptr {
 macro_rules! ioctl_readwrite_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
         $(#[$attr])*
+            /// # Safety
+            /// ioctl call need unsafe calls to C
             pub unsafe fn $name(fd: nix::libc::c_int,
                                 data: *mut $ty)
                                 -> nix::Result<nix::libc::c_int> {
@@ -134,7 +138,7 @@ impl UsbFsUrb {
             flags: 0,
             buffer: ptr,
             buffer_length: length as i32,
-            actual_length: 0 as i32,
+            actual_length: 0,
             start_frame: 0,
             stream_id: 0,
             error_count: 0,
@@ -167,19 +171,6 @@ impl fmt::Display for UsbFsUrb {
         writeln!(f, "signr: {}", self.signr)?;
         writeln!(f, "usercontext: {:X?}", self.usercontext)
     }
-}
-
-// should be put in another file outside os?...
-pub trait UsbTransfer<T> {
-    fn buffer_from_raw_mut<'a>(&self) -> &'a mut [u8];
-    fn buffer_from_raw<'a>(&self) -> &'a [u8];
-}
-
-pub trait UsbCoreTransfer<T> {
-    fn new_bulk(&mut self, ep: u8, size: usize) -> io::Result<T>;
-    fn new_interrupt(&mut self, ep: u8, size: usize) -> io::Result<T>;
-    fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<T>;
-    fn new_control(&mut self, ep: u8, ctl: ControlTransfer) -> io::Result<T>;
 }
 
 impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
@@ -322,12 +313,6 @@ impl UsbFs {
         }
 
         &self.descriptors
-    }
-
-    /// This avoid copy used by enumerator
-    #[allow(dead_code)]
-    pub(crate) fn take_descriptors(&mut self) -> Option<UsbDevice> {
-        self.descriptors.take()
     }
 
     pub fn capabilities(&mut self) -> io::Result<u32> {

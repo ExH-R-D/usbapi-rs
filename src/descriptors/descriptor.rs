@@ -22,24 +22,6 @@ pub enum DescriptorType {
     Unknown(Vec<u8>),
 }
 
-/*
-impl From<u8> for DescriptorType {
-    fn from(original: u8) -> DescriptorType {
-        match original {
-            1 => DescriptorType::Device,
-            2 => DescriptorType::Configuration,
-            3 => DescriptorType::String,
-            4 => DescriptorType::Interface,
-            5 => DescriptorType::Endpoint,
-            0x24 => DescriptorType::ClassSpecific,
-            0x29 => DescriptorType::Hub,
-            0x30 => DescriptorType::SsEndpointCompanion,
-            _n => DescriptorType::Unknown
-        }
-    }
-}
-*/
-
 // FIXME would probably be better return an enum
 // Something like DescriptorType::XXX(yyy) where yyy is a struct of type
 impl Iterator for Descriptor {

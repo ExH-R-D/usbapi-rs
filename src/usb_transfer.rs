@@ -1,3 +1,4 @@
+use std::io;
 use std::time::Duration;
 #[derive(Clone, Debug)]
 pub struct ControlTransfer {
@@ -66,4 +67,16 @@ impl ControlTransfer {
             timeout,
         }
     }
+}
+
+pub trait UsbTransfer<T> {
+    fn buffer_from_raw_mut<'a>(&self) -> &'a mut [u8];
+    fn buffer_from_raw<'a>(&self) -> &'a [u8];
+}
+
+pub trait UsbCoreTransfer<T> {
+    fn new_bulk(&mut self, ep: u8, size: usize) -> io::Result<T>;
+    fn new_interrupt(&mut self, ep: u8, size: usize) -> io::Result<T>;
+    fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<T>;
+    fn new_control(&mut self, ep: u8, ctl: ControlTransfer) -> io::Result<T>;
 }

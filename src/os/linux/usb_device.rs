@@ -1,10 +1,10 @@
 use crate::descriptors::descriptor::{Descriptor, DescriptorType};
 use crate::descriptors::device::Device;
 use crate::UsbCore;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt;
 use std::io::prelude::*;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct UsbDevice {
     pub bus_num: u8,
     pub dev_num: u8,

@@ -1,8 +1,6 @@
-pub mod control_transfer;
 pub mod descriptors;
 pub mod os;
-#[cfg(target_os = "linux")]
-pub use control_transfer::ControlTransfer;
+pub mod usb_transfer;
 #[cfg(target_os = "linux")]
 pub use os::linux::constants::*;
 #[cfg(target_os = "linux")]
@@ -11,5 +9,4 @@ pub use os::linux::enumerate::UsbEnumerate;
 pub use os::linux::usb_device::UsbDevice;
 #[cfg(target_os = "linux")]
 pub use os::linux::usbfs::UsbFs as UsbCore;
-#[cfg(target_os = "linux")]
-pub use os::linux::usbfs::{UsbCoreTransfer, UsbTransfer};
+pub use usb_transfer::{ControlTransfer, UsbCoreTransfer, UsbTransfer};

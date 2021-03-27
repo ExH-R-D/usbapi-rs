@@ -30,9 +30,9 @@ pub struct UsbEnumerate {
 
 impl UsbEnumerate {
     pub fn from_sysfs() -> std::io::Result<Self> {
-        Ok(SysFs::usb_devices()
+        SysFs::usb_devices()
             .map_err(|e| Error::new(ErrorKind::Other, e))?
-            .try_into()?)
+            .try_into()
     }
 
     pub fn devices(&self) -> &HashMap<String, UsbDevice> {
