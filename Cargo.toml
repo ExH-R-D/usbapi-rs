@@ -1,6 +1,6 @@
 [package]
 name = "usbapi"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["Mikael Hermansson <mike7b4@protonmail.com>"]
 keywords = ["usb", "usbcore", "hardware"]
 edition="2018"
