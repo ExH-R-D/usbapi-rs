@@ -2,7 +2,6 @@ use super::constants::*;
 use crate::UsbDevice;
 use nix::*;
 use std::collections::HashMap;
-use std::ffi::CString;
 use std::fmt;
 use std::fs::OpenOptions;
 use std::io;
@@ -66,7 +65,6 @@ union UrbUnion {
     stream_id: u32,
 }
 
-#[repr(C)]
 #[derive(Clone, Debug)]
 pub struct ControlTransfer {
     request_type: u8,
@@ -75,7 +73,7 @@ pub struct ControlTransfer {
     index: u16,
     length: u16,
     timeout: u32,
-    pub data: *mut u8,
+    data: Vec<u8>,
 }
 
 impl ControlTransfer {
@@ -84,20 +82,12 @@ impl ControlTransfer {
         request: u8,
         value: u16,
         index: u16,
-        buf: Option<Vec<u8>>,
+        data: Option<Vec<u8>>,
         timeout: u32,
     ) -> Self {
-        let length;
-        let data;
-        if let Some(buf) = buf {
-            length = buf.len() as u16;
-            let mut buf = std::mem::ManuallyDrop::new(buf);
-            data = buf.as_mut_ptr();
-        } else {
-            length = 0;
-            data = ptr::null_mut();
-        }
-
+        // ugly but keep back compability for now
+        let data = data.unwrap_or_else(|| Vec::new());
+        let length = data.len() as u16;
         ControlTransfer {
             request_type,
             request,
@@ -107,14 +97,6 @@ impl ControlTransfer {
             timeout,
             data,
         }
-    }
-
-    pub fn get_slice<'a>(self) -> &'a [u8] {
-        if self.length == 0 || self.data.is_null() {
-            return &[];
-        }
-
-        unsafe { std::slice::from_raw_parts_mut(self.data, self.length as usize) }
     }
 }
 
@@ -183,13 +165,13 @@ impl UsbFsUrb {
             stream_id: 0,
             error_count: 0,
             signr: 0,
-            usercontext: ptr,
+            usercontext: ptr::null_mut(),
         }
     }
 
     pub fn control_data_as_ref<'a>(&self) -> &'a [u8] {
         let b = self.buffer_from_raw();
-        if b.len() < 8 {
+        if b.len() <= 8 {
             return &[];
         }
         &b[8..8 + self.actual_length as usize]
@@ -198,45 +180,16 @@ impl UsbFsUrb {
 
 impl Drop for UsbFsUrb {
     fn drop(&mut self) {
-        if !self.usercontext.is_null() {
-            println!("munmap {:X?}", self.usercontext);
+        if !self.buffer.is_null() {
             unsafe {
                 libc::munmap(
-                    self.usercontext as *mut libc::c_void,
+                    self.buffer as *mut libc::c_void,
                     self.buffer_length as usize,
                 );
-            }
+            };
         }
     }
 }
-
-/*
-#[deprecated(since = "0.2.3", note = "Use new_control instead")]
-impl From<(u8, ControlTransfer)> for UsbFsUrb {
-    fn from((ep, ctl): (u8, ControlTransfer)) -> Self {
-        // FIXMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
-        let mut v: Vec<u8> = Vec::new();
-        v.push(ctl.request_type);
-        v.push(ctl.request);
-        v.push((ctl.value & 0x00FF) as u8);
-        v.push((ctl.value >> 8) as u8);
-        v.push((ctl.index & 0x00FF) as u8);
-        v.push((ctl.index >> 8) as u8);
-        v.push((ctl.length & 0x00FF) as u8);
-        v.push((ctl.length >> 8) as u8);
-        for a in ctl.get_slice() {
-            v.push(*a);
-        }
-        let length = v.len();
-
-        let p = v.as_mut_ptr();
-        std::mem::forget(v);
-        println!("aloc {:X?}", p);
-
-        Self::new(USBFS_URB_TYPE_CONTROL, ep, p, length)
-    }
-}
-*/
 
 impl fmt::Display for UsbFsUrb {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -275,10 +228,9 @@ impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
     fn buffer_from_raw<'a>(&self) -> &'a [u8] {
         unsafe {
             if (self.endpoint & ENDPOINT_IN) == ENDPOINT_IN {
-                println!("IN {} {:02X?}", self.actual_length, self.buffer);
-                std::slice::from_raw_parts_mut(self.buffer, self.actual_length as usize)
+                std::slice::from_raw_parts(self.buffer, self.actual_length as usize)
             } else {
-                std::slice::from_raw_parts_mut(self.buffer, self.buffer_length as usize)
+                std::slice::from_raw_parts(self.buffer, self.buffer_length as usize)
             }
         }
     }
@@ -301,26 +253,34 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
     }
 
     fn new_control(&mut self, ep: u8, ctl: ControlTransfer) -> io::Result<UsbFsUrb> {
-        let length = mem::size_of::<ControlTransfer>() + ctl.length as usize;
-        let p = self.mmap(length)?;
-        unsafe {
+        let length = 8 + ctl.length;
+        let p = self.mmap(length as usize)?;
+        //let p = libc::malloc(length as usize) as *mut u8;
+        //if p.is_null() {
+        //   return Err(std::io::Error::last_os_error());
+        //}
+        let p = unsafe {
             *p.add(0) = ctl.request_type;
             *p.add(1) = ctl.request;
             *p.add(2) = (ctl.value & 0x00FF) as u8;
             *p.add(3) = (ctl.value >> 8) as u8;
-            *p.add(3) = (ctl.index & 0x00FF) as u8;
-            *p.add(4) = (ctl.index >> 8) as u8;
-            *p.add(5) = (ctl.length & 0x00FF) as u8;
-            *p.add(6) = (ctl.length >> 8) as u8;
-        }
-
-        for (i, byte) in ctl.get_slice().iter().enumerate() {
+            *p.add(4) = (ctl.index & 0x00FF) as u8;
+            *p.add(5) = (ctl.index >> 8) as u8;
+            *p.add(6) = (ctl.length & 0x00FF) as u8;
+            *p.add(7) = (ctl.length >> 8) as u8;
+            p
+        };
+        for (i, byte) in ctl.data.iter().enumerate() {
             unsafe {
-                *p.add(i + 7) = *byte;
+                *p.add(i + 8) = *byte;
             }
         }
-
-        Ok(UsbFsUrb::new(USBFS_URB_TYPE_CONTROL, ep, p, length))
+        Ok(UsbFsUrb::new(
+            USBFS_URB_TYPE_CONTROL,
+            ep,
+            p,
+            length as usize,
+        ))
     }
 }
 
@@ -451,26 +411,9 @@ impl UsbFs {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         if res.is_ok() {
-            // FIXME wierd hackish mess
-            let raw_driver_name = unsafe { CString::from_raw(driver.driver.to_vec().as_mut_ptr()) };
-            // we need to clone it
-            let driver_name = raw_driver_name.clone();
-            // convert it
-            let driver_name = driver_name.to_str().unwrap_or("");
-            // and forget not free the original
-            std::mem::forget(raw_driver_name);
-            if driver_name != "usbfs" {
-                log::debug!("Not a usbfs device we need to unload kernel module if possible");
-                let mut disconnect = UsbFsIoctl {
-                    interface: 0,
-                    code: request_code_none!(b'U', 22) as i32,
-                    data: ptr::null_mut(),
-                };
-                // Disconnect driver
-                unsafe { usb_ioctl(self.handle.as_raw_fd(), &mut disconnect) }
-                    .map_err(|_| io::Error::last_os_error())?;
-            }
+            panic!("FIXME the unload drivers API is broken and need to be fixed");
         }
+        mem::drop(driver);
         unsafe { usb_claim_interface(self.handle.as_raw_fd(), &interface) }
             .map_err(|_| io::Error::last_os_error())?;
         self.claims.push(interface);
@@ -548,12 +491,11 @@ impl UsbFs {
             data: mem,
         };
 
+        // wait what??
         let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &mut bulk) }
             .map_err(|_| io::Error::last_os_error())?;
         // Note! ioctl return -1 on IO error...
         if res < 0 {
-            eprintln!("Bulk endpoint: {:02X} error cause {:?}", ep, res);
-            // This is fucking anoying there must be better way do this
             return Err(io::Error::from_raw_os_error(
                 nix::Error::last().as_errno().unwrap() as i32,
             ));
@@ -561,15 +503,17 @@ impl UsbFs {
         Ok(res as u32)
     }
 
+    // FIXME error handling should be an result
     pub fn get_descriptor_string(&mut self, id: u8) -> String {
         self.get_descriptor_string_iface(0, id)
     }
 
+    // FIXME error handling should be an result or an option
     pub fn get_descriptor_string_iface(&mut self, iface: u16, id: u8) -> String {
         if self.read_only {
             return "".into();
         }
-        let vec = vec![0; 1024];
+        let vec = vec![0; 256];
         match self.control(ControlTransfer::new(
             0x80,
             0x06,
@@ -581,11 +525,12 @@ impl UsbFs {
             Ok(data) => {
                 let mut length = data.len();
                 if length % 2 != 0 || length == 0 {
-                    eprintln!(
+                    log::error!(
                         "Alignment {} error invalid UTF-16 ignored string id {}",
-                        length, id
+                        length,
+                        id
                     );
-                    return "Invalid UTF-16".into();
+                    return "".into();
                 }
                 length /= 2;
                 let utf =
@@ -634,14 +579,12 @@ impl UsbFs {
         Ok(res)
     }
 
+    // FIXME use mio if feature  is enabled
     pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
-        let mut timeout = ctrl.timeout;
+        let mut timeout = ctrl.timeout + 1;
         let asc = self.new_control(0, ctrl)?;
         self.async_transfer(asc)?;
         let urb: UsbFsUrb;
-        if timeout == 0 {
-            timeout = 0xFFFF;
-        }
         loop {
             match self.async_response() {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
