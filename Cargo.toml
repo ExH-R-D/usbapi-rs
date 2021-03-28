@@ -1,6 +1,6 @@
 [package]
 name = "usbapi"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Mikael Hermansson <mike7b4@protonmail.com>"]
 keywords = ["usb", "usbcore", "hardware"]
 edition="2018"
@@ -14,8 +14,8 @@ readme = "readme.md"
 log = "0.4"
 libc="0.2"
 nix="0.18"
-serde={version = '1.0', features=['derive']}
-sysfs-serde = "0.2"
+serde={version = '1.0', features=['derive'], optional=true}
+sysfs-serde = {path="../sysfs-serde/"} #"0.2"
 mio = {version = "0.6", optional = true}
 
 [features]
@@ -30,3 +30,8 @@ toml = "0.5"
 [[example]]
 name = "stm32"
 required-features = ["mio-support"]
+
+[[example]]
+name = "enumerate"
+required-features = ["serde"]
+

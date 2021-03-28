@@ -24,11 +24,11 @@ See Cargo.toml
 
 When I started this project I was new in Rust. Some stuff will change.
 
- - [ ] serde should be optional feature
+ - [X] serde should be optional feature
  - [ ] USBCore should be done as trait(s) for easier porting to other platforms.
  - [X] Fix possible leak in sync_respond()
  - [ ] Add isochronous support
- - [ ] Use log crate instead of eprintln and println for debug.
+ - [X] Use log crate instead of eprintln and println for debug.
  - [ ] Some functions prints errors those should be passed as results
  - [ ] claim_interface will panic if kernel driver is loaded since unload driver is not implemented.
 

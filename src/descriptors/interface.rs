@@ -1,8 +1,10 @@
 use crate::descriptors::endpoint::Endpoint;
+#[cfg(feature = "serde")]
 use serde::Serialize;
 use std::fmt;
 use std::slice::Iter;
-#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug)]
 pub struct Interface {
     length: u8,
     kind: u8,

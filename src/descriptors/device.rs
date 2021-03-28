@@ -1,23 +1,25 @@
 use crate::descriptors::configuration::Configuration;
+#[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 use std::fmt;
 use std::slice::Iter;
 
-#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug)]
 pub struct Device {
     pub length: u8,
     pub kind: u8,
-    #[serde(serialize_with = "to_hex16")]
+    #[cfg_attr(feature = "serde", serde(serialize_with = "to_hex16"))]
     pub bcd_usb: u16,
     pub device_class: u8,
     pub device_sub_class: u8,
     pub device_protocol: u8,
     pub max_packet_size0: u8,
-    #[serde(serialize_with = "to_hex16")]
+    #[cfg_attr(feature = "serde", serde(serialize_with = "to_hex16"))]
     pub id_vendor: u16,
-    #[serde(serialize_with = "to_hex16")]
+    #[cfg_attr(feature = "serde", serde(serialize_with = "to_hex16"))]
     pub id_product: u16,
-    #[serde(serialize_with = "to_hex16")]
+    #[cfg_attr(feature = "serde", serde(serialize_with = "to_hex16"))]
     pub bcd_device: u16,
     pub imanufacturer: u8,
     pub iproduct: u8,
@@ -26,6 +28,7 @@ pub struct Device {
     pub configurations: Vec<Configuration>,
 }
 
+#[cfg(feature = "serde")]
 fn to_hex16<S>(id_vendor: &u16, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
