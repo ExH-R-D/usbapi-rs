@@ -53,7 +53,7 @@ pub struct UsbFsIsoPacketSize {
 #[repr(C)]
 pub struct UsbFsGetDriver {
     interface: i32,
-    driver: [libc::c_char; 256],
+    driver: [u8; 256],
 }
 
 #[repr(C)]
@@ -377,8 +377,9 @@ impl UsbFs {
         let driver: UsbFsGetDriver = unsafe { mem::zeroed() };
         let res = unsafe { usb_get_driver(self.handle.as_raw_fd(), &driver) };
         if res == Ok(0) {
-            let c_str: &CStr = unsafe { CStr::from_ptr(driver.driver.as_ptr()) };
-            let name: &str = c_str.to_str().unwrap();
+            let c_str: &CStr = CStr::from_bytes_with_nul(&driver.driver)
+                .map_err(|e| Error::new(ErrorKind::Other, format!("{}", e)))?;
+            let name: &str = c_str.to_str().unwrap_or("");
             if name != "usbfs" {
                 panic!("FIXME the unload driver API is broken and need to be fixed");
             }

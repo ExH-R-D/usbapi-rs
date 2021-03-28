@@ -84,17 +84,26 @@ fn main() -> Result<(), std::io::Error> {
             println!(
                 "Manufacturer: {}",
                 usb.get_descriptor_string(device.device.imanufacturer)
+                    .unwrap_or("?".into())
             );
             println!(
                 "Product: {}",
                 usb.get_descriptor_string(device.device.iproduct)
+                    .unwrap_or("?".into())
             );
             println!(
                 "Serial: {}",
                 usb.get_descriptor_string(device.device.iserial)
+                    .unwrap_or("?".into())
             );
             let _ = usb.claim_interface(1).is_ok();
-            match usb.control(ControlTransfer::new(0x21, 0x22, 0x3, 0, None, 100)) {
+            match usb.control_async_wait(ControlTransfer::new_nodata(
+                0x21,
+                0x22,
+                0x3,
+                0,
+                Duration::from_millis(100),
+            )) {
                 Ok(_) => {}
                 Err(err) => println!("Send bytes to control failed {}", err),
             };
