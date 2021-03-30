@@ -5,12 +5,12 @@ use std::slice::Iter;
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug)]
 pub struct Endpoint {
-    length: u8,
-    kind: u8,
-    endpoint_address: u8,
-    bm_attributes: u8,
-    max_packet_size: u16,
-    interval: u8,
+    pub length: u8,
+    pub kind: u8,
+    pub endpoint_address: u8,
+    pub bm_attributes: u8,
+    pub max_packet_size: u16,
+    pub interval: u8,
 }
 
 impl fmt::Display for Endpoint {
