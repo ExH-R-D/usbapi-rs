@@ -82,7 +82,7 @@ union UrbUnion {
 pub struct BulkTransfer {
     ep: u32,
     length: u32,
-    timeout: u32,
+    timeout_ms: u32,
     data: *mut libc::c_void,
 }
 
@@ -420,9 +420,10 @@ impl UsbFs {
     ///
     /// Blocked bulk read
     /// Consider use @async_transfer() instead.
-    pub fn bulk_read(&self, ep: u8, mem: &mut [u8]) -> io::Result<u32> {
+    pub fn bulk_read(&self, ep: u8, timeout_ms: u32, mem: &mut [u8]) -> io::Result<u32> {
         self.bulk(
             0x80 | ep,
+	    timeout_ms,
             mem.as_mut_ptr() as *mut libc::c_void,
             mem.len() as u32,
         )
@@ -430,19 +431,20 @@ impl UsbFs {
 
     /// Blocked bulk write
     /// consider use @async_transfer() instead
-    pub fn bulk_write(&self, ep: u8, mem: &[u8]) -> io::Result<u32> {
+    pub fn bulk_write(&self, ep: u8, timeout_ms: u32, mem: &[u8]) -> io::Result<u32> {
         self.bulk(
             ep & 0x7F,
+	    timeout_ms,
             mem.as_ptr() as *mut libc::c_void,
             mem.len() as u32,
         )
     }
 
-    fn bulk(&self, ep: u8, mem: *mut libc::c_void, length: u32) -> io::Result<u32> {
+    fn bulk(&self, ep: u8, timeout_ms: u32, mem: *mut libc::c_void, length: u32) -> io::Result<u32> {
         let mut bulk = BulkTransfer {
             ep: ep as u32,
             length,
-            timeout: 1,
+            timeout_ms,
             data: mem,
         };
 
@@ -465,6 +467,12 @@ impl UsbFs {
 
     /// Get descriptor string with id for interface
     pub fn get_descriptor_string_iface(&mut self, iface: u16, id: u8) -> std::io::Result<String> {
+	if id == 0 {
+            return Err(Error::new(
+                ErrorKind::Other,
+		"Cannot get descriptor string for zero ID"
+	    ));
+	}
         if self.read_only {
             return Err(Error::new(
                 ErrorKind::Other,
@@ -480,19 +488,23 @@ impl UsbFs {
             Duration::from_millis(100),
         )) {
             Ok(data) => {
-                let mut length = data.len();
-                if length % 2 != 0 || length == 0 {
+                let length = data.len();
+                if length % 2 != 0 || length <= 2 {
                     log::error!(
-                        "Alignment {} error invalid UTF-16 ignored string id {}",
+                        "Received an odd or short descriptor string of length {} for ID {}",
                         length,
                         id
                     );
-                    return Ok("Invalid UTF16".into());
+                    return Ok("Invalid descriptor".into());
                 }
-                length /= 2;
-                let utf =
-                    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u16, length) };
-                Ok(String::from_utf16_lossy(utf))
+		let n = length / 2;
+		let mut x = [0;2];
+		let mut utf16 = Vec::with_capacity(n);
+		for i in 1..n {
+		    x.copy_from_slice(&data[2*i..2*i+2]);
+		    utf16.push(u16::from_le_bytes(x));
+		}
+                Ok(String::from_utf16_lossy(&utf16))
             }
             Err(e) => Err(Error::new(
                 ErrorKind::Other,
