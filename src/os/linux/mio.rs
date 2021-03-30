@@ -1,31 +1,29 @@
 use super::usbfs::UsbFs;
-use mio::event::Evented;
-use mio::unix::EventedFd;
-use mio::{Poll, PollOpt, Ready, Token};
+use mio::event::Source;
+use mio::unix::SourceFd;
+use mio::{Interest, Poll, Registry, Token};
 use std::io;
 use std::os::unix::io::AsRawFd;
-impl Evented for UsbFs {
+impl Source for UsbFs {
     fn register(
-        &self,
-        poll: &Poll,
+        &mut self,
+        registry: &Registry,
         token: Token,
-        interest: Ready,
-        opts: PollOpt,
+        interests: Interest,
     ) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).register(poll, token, interest, opts)
+        SourceFd(&self.handle.as_raw_fd()).register(registry, token, interests)
     }
 
     fn reregister(
-        &self,
-        poll: &Poll,
+        &mut self,
+        registry: &Registry,
         token: Token,
-        interest: Ready,
-        opts: PollOpt,
+        interests: Interest,
     ) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).reregister(poll, token, interest, opts)
+        SourceFd(&self.handle.as_raw_fd()).reregister(registry, token, interests)
     }
 
-    fn deregister(&self, poll: &Poll) -> io::Result<()> {
-        EventedFd(&self.handle.as_raw_fd()).deregister(poll)
+    fn deregister(&mut self, registry: &Registry) -> io::Result<()> {
+        SourceFd(&self.handle.as_raw_fd()).deregister(registry)
     }
 }

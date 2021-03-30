@@ -16,11 +16,10 @@ libc="0.2"
 nix="0.18"
 serde={version = '1.0', features=['derive'], optional=true}
 sysfs-serde = "0.2"
-mio = {version = "0.6", optional = true}
+mio = {version = "0.7", features=["os-ext"], optional = true}
 
 [features]
 default = []
-mio-support = ["mio"]
 
 [dev-dependencies]
 signal-hook = "0.1"
@@ -29,7 +28,7 @@ toml = "0.5"
 
 [[example]]
 name = "stm32"
-required-features = ["mio-support"]
+required-features = ["mio"]
 
 [[example]]
 name = "enumerate"

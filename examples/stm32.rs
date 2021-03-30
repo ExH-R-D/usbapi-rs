@@ -1,6 +1,6 @@
 /// This example is ugly
 /// For more see: https://gitlab.com/mike7b4/dfuflash
-use mio::{Evented, Events, Poll, PollOpt, Ready, Token};
+use mio::{Events, Interest, Poll, Token};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,14 +29,16 @@ fn block_transfer(usb: &mut UsbCore) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn poll_send(poll: &Poll, usb: &mut UsbCore) -> Result<(), std::io::Error> {
+fn poll_send(poll: &mut Poll, usb: &mut UsbCore) -> Result<(), std::io::Error> {
     let mut events = Events::with_capacity(1);
     let mut urbtx = usb.new_bulk(BULK_OUT, 1)?;
     let slice = urbtx.buffer_from_raw_mut();
     slice[0] = SYNC_BYTE;
     println!("=== urbtx before poll ====\n{}", urbtx);
     usb.async_transfer(urbtx)?;
-    if poll.poll(&mut events, Some(Duration::from_millis(100)))? == 0 {
+    poll.poll(&mut events, Some(Duration::from_millis(100)))
+        .expect("Poll bailed");
+    if events.is_empty() {
         panic!("Poll did not return anything");
     }
     urbtx = usb.async_response()?;
@@ -45,11 +47,12 @@ fn poll_send(poll: &Poll, usb: &mut UsbCore) -> Result<(), std::io::Error> {
 }
 
 fn poll_transfer(terminate: Arc<AtomicBool>, usb: &mut UsbCore) -> Result<(), std::io::Error> {
-    let poll = Poll::new().unwrap();
+    let mut poll = Poll::new().unwrap();
     let mut events = Events::with_capacity(1);
-    usb.register(&poll, Token(0), Ready::writable(), PollOpt::edge())?;
+    poll.registry()
+        .register(usb, Token(0), Interest::WRITABLE)?;
 
-    poll_send(&poll, usb)?;
+    poll_send(&mut poll, usb)?;
     // send one byte
     let mut urbrx = usb.new_bulk(BULK_IN, 64)?;
     usb.async_transfer(urbrx).unwrap_or(0);
