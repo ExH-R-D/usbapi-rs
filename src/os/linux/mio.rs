@@ -1,7 +1,7 @@
 use super::usbfs::UsbFs;
 use mio::event::Source;
 use mio::unix::SourceFd;
-use mio::{Interest, Poll, Registry, Token};
+use mio::{Interest, Registry, Token};
 use std::io;
 use std::os::unix::io::AsRawFd;
 impl Source for UsbFs {

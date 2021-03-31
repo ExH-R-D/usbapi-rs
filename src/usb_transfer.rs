@@ -1,5 +1,5 @@
+use crate::TimeoutMillis;
 use std::io;
-use std::time::Duration;
 #[derive(Clone, Debug)]
 pub struct ControlTransfer {
     pub request_type: u8,
@@ -7,7 +7,7 @@ pub struct ControlTransfer {
     pub value: u16,
     pub index: u16,
     pub buffer_length: u16,
-    pub timeout: Duration,
+    pub timeout: TimeoutMillis,
     pub buffer: Option<Vec<u8>>,
 }
 
@@ -17,7 +17,7 @@ impl ControlTransfer {
         request: u8,
         value: u16,
         index: u16,
-        timeout: Duration,
+        timeout: TimeoutMillis,
     ) -> Self {
         ControlTransfer {
             request_type,
@@ -36,7 +36,7 @@ impl ControlTransfer {
         value: u16,
         index: u16,
         buffer_length: u16,
-        timeout: Duration,
+        timeout: TimeoutMillis,
     ) -> Self {
         ControlTransfer {
             request_type,
@@ -55,7 +55,7 @@ impl ControlTransfer {
         value: u16,
         index: u16,
         v: Vec<u8>,
-        timeout: Duration,
+        timeout: TimeoutMillis,
     ) -> Self {
         ControlTransfer {
             request_type,

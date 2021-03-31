@@ -11,17 +11,22 @@ const BULK_OUT: u8 = 0x1;
 
 fn block_transfer(usb: &mut UsbCore) -> Result<(), std::io::Error> {
     let mut mem: [u8; 64] = [0; 64];
-    let timeout_ms = 1;
-    let len = usb.bulk_read(1, timeout_ms, &mut mem).unwrap_or(0);
+    let len = usb.bulk_read(1, &mut mem, 1.into()).unwrap_or(0);
     println!("Read once to check if there where some garbage");
     println!("1 {} received data {:?}", len, &mem[0..len as usize]);
-    let len = usb.bulk_read(1, timeout_ms, &mut mem).unwrap_or(0);
+    let len = usb
+        .bulk_read(1, &mut mem, TimeoutMillis::from(1))
+        .unwrap_or(0);
     println!("2 {} received data: {:?}", len, &mem[0..len as usize]);
     assert!(len == 0);
-    let len = usb.bulk_write(1, timeout_ms, "$".to_string().as_bytes()).unwrap_or(0);
+    let len = usb
+        .bulk_write(1, "$".to_string().as_bytes(), 1.into())
+        .unwrap_or(0);
     assert!(len == 1);
     println!("1 {} sent data", len);
-    let len = usb.bulk_read(1, timeout_ms, &mut mem).unwrap_or(0);
+    let len = usb
+        .bulk_read(1, &mut mem, TimeoutMillis::from(1))
+        .unwrap_or(0);
     assert!(len > 0);
     println!(
         "3 Received data try stringify: {}",
@@ -106,7 +111,7 @@ fn main() -> Result<(), std::io::Error> {
                 0x22,
                 0x3,
                 0,
-                Duration::from_millis(100),
+                TimeoutMillis::from(100),
             )) {
                 Ok(_) => {}
                 Err(err) => println!("Send bytes to control failed {}", err),

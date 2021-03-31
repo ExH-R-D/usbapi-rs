@@ -1,5 +1,6 @@
 use super::constants::*;
 use crate::usb_transfer::{ControlTransfer, UsbCoreTransfer, UsbTransfer};
+use crate::TimeoutMillis;
 use crate::UsbDevice;
 use nix::*;
 use std::collections::HashMap;
@@ -420,31 +421,37 @@ impl UsbFs {
     ///
     /// Blocked bulk read
     /// Consider use @async_transfer() instead.
-    pub fn bulk_read(&self, ep: u8, timeout_ms: u32, mem: &mut [u8]) -> io::Result<u32> {
+    pub fn bulk_read(&self, ep: u8, mem: &mut [u8], timeout: TimeoutMillis) -> io::Result<u32> {
         self.bulk(
             0x80 | ep,
-	    timeout_ms,
             mem.as_mut_ptr() as *mut libc::c_void,
             mem.len() as u32,
+            timeout,
         )
     }
 
     /// Blocked bulk write
     /// consider use @async_transfer() instead
-    pub fn bulk_write(&self, ep: u8, timeout_ms: u32, mem: &[u8]) -> io::Result<u32> {
+    pub fn bulk_write(&self, ep: u8, mem: &[u8], timeout: TimeoutMillis) -> io::Result<u32> {
         self.bulk(
             ep & 0x7F,
-	    timeout_ms,
             mem.as_ptr() as *mut libc::c_void,
             mem.len() as u32,
+            timeout,
         )
     }
 
-    fn bulk(&self, ep: u8, timeout_ms: u32, mem: *mut libc::c_void, length: u32) -> io::Result<u32> {
+    fn bulk(
+        &self,
+        ep: u8,
+        mem: *mut libc::c_void,
+        length: u32,
+        timeout: TimeoutMillis,
+    ) -> io::Result<u32> {
         let mut bulk = BulkTransfer {
             ep: ep as u32,
             length,
-            timeout_ms,
+            timeout_ms: timeout.0,
             data: mem,
         };
 
@@ -467,12 +474,12 @@ impl UsbFs {
 
     /// Get descriptor string with id for interface
     pub fn get_descriptor_string_iface(&mut self, iface: u16, id: u8) -> std::io::Result<String> {
-	if id == 0 {
+        if id == 0 {
             return Err(Error::new(
                 ErrorKind::Other,
-		"Cannot get descriptor string for zero ID"
-	    ));
-	}
+                "Cannot get descriptor string for zero ID",
+            ));
+        }
         if self.read_only {
             return Err(Error::new(
                 ErrorKind::Other,
@@ -485,7 +492,7 @@ impl UsbFs {
             0x0300 | id as u16,
             iface,
             256,
-            Duration::from_millis(100),
+            TimeoutMillis::from(100),
         )) {
             Ok(data) => {
                 let length = data.len();
@@ -497,13 +504,13 @@ impl UsbFs {
                     );
                     return Ok("Invalid descriptor".into());
                 }
-		let n = length / 2;
-		let mut x = [0;2];
-		let mut utf16 = Vec::with_capacity(n);
-		for i in 1..n {
-		    x.copy_from_slice(&data[2*i..2*i+2]);
-		    utf16.push(u16::from_le_bytes(x));
-		}
+                let n = length / 2;
+                let mut x = [0; 2];
+                let mut utf16 = Vec::with_capacity(n);
+                for i in 1..n {
+                    x.copy_from_slice(&data[2 * i..2 * i + 2]);
+                    utf16.push(u16::from_le_bytes(x));
+                }
                 Ok(String::from_utf16_lossy(&utf16))
             }
             Err(e) => Err(Error::new(
@@ -549,7 +556,7 @@ impl UsbFs {
     }
 
     pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
-        let timeout = ctrl.timeout;
+        let timeout_ms = ctrl.timeout.0;
         let asc = self.new_control(0, ctrl)?;
         self.async_transfer(asc)?;
         let instant = Instant::now();
@@ -566,7 +573,7 @@ impl UsbFs {
                     return Ok(data);
                 }
             }
-            if instant.elapsed() >= timeout {
+            if instant.elapsed() >= Duration::from_millis(timeout_ms as u64) {
                 return Err(Error::new(ErrorKind::TimedOut, ""));
             }
         }
