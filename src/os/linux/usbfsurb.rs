@@ -40,12 +40,6 @@ impl UsbFsUrb {
             usercontext: user,
         }
     }
-
-    /// set buffer_length to length and resets actual_length to 0
-    pub fn set_length(&mut self, length: usize) {
-        self.actual_length = 0;
-        self.buffer_length = length as i32;
-    }
 }
 
 impl fmt::Display for UsbFsUrb {

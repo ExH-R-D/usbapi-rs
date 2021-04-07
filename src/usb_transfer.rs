@@ -1,4 +1,4 @@
-use crate::endpoint::Endpoint;
+use crate::endpoint::*;
 use std::fmt;
 use std::io;
 use std::io::Write;
@@ -28,8 +28,7 @@ impl fmt::Display for ControlTransfer {
 }
 
 impl ControlTransfer {
-    // Buffer to store header + body
-    pub fn new<DEALOC>(
+    pub(crate) fn new<DEALOC>(
         buffer: *mut u8,
         buffer_capacity: u16,
         buffer_length: u16,
@@ -61,8 +60,8 @@ impl Write for ControlTransfer {
         let buf = unsafe {
             let buf = self.buffer;
             std::slice::from_raw_parts_mut(
-                buf.offset(self.buffer_length as isize + 8),
-                self.buffer_capacity as usize - self.buffer_length as usize - 8,
+                buf.offset(self.buffer_length as isize),
+                self.buffer_capacity as usize - self.buffer_length as usize,
             )
         };
 
@@ -177,6 +176,7 @@ impl Write for BulkTransfer {
             buf[i] = *byte;
             self.buffer_length += 1;
         }
+
         Ok(inbuf.len())
     }
 
@@ -216,12 +216,46 @@ pub trait UsbCoreDriver {
     // Create a new control
     fn new_control(
         &mut self,
+        request_type: u8, // bRequestType
+        request: u8,      // bRequest
+        value: u16,       // wValue
+        index: u16,       // wIndex
+        length: u16,      // wLength
+    ) -> io::Result<ControlTransfer>;
+
+    fn new_control_out(
+        &mut self,
         request_type: u8,
         request: u8,
         value: u16,
         index: u16,
-        buffer_capacity: u16,
-    ) -> io::Result<ControlTransfer>;
+        buffer: &[u8],
+    ) -> io::Result<ControlTransfer> {
+        let mut ctrl = self.new_control(
+            request_type | ENDPOINT_OUT,
+            request,
+            value,
+            index,
+            buffer.len() as u16, // wLength
+        )?;
+        ctrl.write_all(buffer)?;
+        Ok(ctrl)
+    }
+
+    fn new_control_in(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        length: u16, // wLength (Read length)
+    ) -> io::Result<ControlTransfer> {
+        let mut ctrl =
+            self.new_control(request_type | ENDPOINT_IN, request, value, index, length)?;
+        ctrl.buffer_length += length;
+        Ok(ctrl)
+    }
+
     // Create a new control
     fn new_control_nodata(
         &mut self,
@@ -229,5 +263,7 @@ pub trait UsbCoreDriver {
         request: u8,
         value: u16,
         index: u16,
-    ) -> io::Result<ControlTransfer>;
+    ) -> io::Result<ControlTransfer> {
+        self.new_control(request_type, request, value, index, 0)
+    }
 }

@@ -137,9 +137,9 @@ impl UsbCoreDriver for UsbFs {
         request: u8,
         value: u16,
         index: u16,
-        buffer_capacity: u16,
+        length: u16,
     ) -> io::Result<ControlTransfer> {
-        if buffer_capacity > CONTROL_MAX_PACKET_SIZE {
+        if length > CONTROL_MAX_PACKET_SIZE {
             return Err(Error::new(
                 ErrorKind::Other,
                 format!(
@@ -148,30 +148,22 @@ impl UsbCoreDriver for UsbFs {
                 ),
             ));
         }
-        let length = buffer_capacity + 8;
-        let p = self.mmap(buffer_capacity as usize + 8)?;
-        let p = unsafe {
-            *p.add(0) = request_type;
-            *p.add(1) = request;
-            *p.add(2) = (value & 0x00FF) as u8;
-            *p.add(3) = (value >> 8) as u8;
-            *p.add(4) = (index & 0x00FF) as u8;
-            *p.add(5) = (index >> 8) as u8;
-            *p.add(6) = (buffer_capacity & 0x00FF) as u8;
-            *p.add(7) = (buffer_capacity >> 8) as u8;
-            p
-        };
-        Ok(ControlTransfer::new(p, length, length, Self::munmap))
-    }
 
-    fn new_control_nodata(
-        &mut self,
-        request_type: u8,
-        request: u8,
-        value: u16,
-        index: u16,
-    ) -> io::Result<ControlTransfer> {
-        self.new_control(request_type, request, value, index, 0)
+        let capacity_length = length as usize + 8;
+        let p = self.mmap(capacity_length)?;
+        let mut ctrl = ControlTransfer::new(p, capacity_length as u16, 0, Self::munmap);
+        ctrl.write_all(&[
+            request_type,
+            request,
+            (value & 0x00FF) as u8,
+            (value >> 8) as u8,
+            (index & 0x00FF) as u8,
+            (index >> 8) as u8,
+            (length & 0x00FF) as u8,
+            (length >> 8) as u8,
+        ])?;
+
+        Ok(ctrl)
     }
 }
 
@@ -452,7 +444,7 @@ impl UsbFs {
                 "Can't read descriptors since has been open as ready only",
             ));
         }
-        let ctrl = self.new_control(
+        let ctrl = self.new_control_in(
             0x80,               // request_type
             0x06,               // request
             0x0300 | id as u16, // value
