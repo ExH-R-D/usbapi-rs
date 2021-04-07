@@ -1,6 +1,6 @@
 # Native USB API for Rust
 
-Heavily inspired by the C http://libusb.info driver.
+Inspired by the C http://libusb.info driver.
 
 Rust usbapi crate currently only support Linux.
 
@@ -10,27 +10,28 @@ You are free to fork or send pull request and make it work on other platforms.
 
 # Dependencies
 
-See Cargo.toml
+See Cargo.toml I try to use as less as possible.
 
 ## Supported functions in Linux
 
 - [X] Enumerate USB peripherals
 - [X] Zero copy using mmap buffers.
-- [X] Sync bulk/control API's
-- [X] Async bulk transmissions
-- [X] Descriptors implements serde for easy serializing to JSON, Toml etc...
+- [X] Sync bulk API's
+- [X] Async bulk and control transmissions
+- [X] Transfers are safe and can't be accessed after passed to kernel
+- [X] Optional all descriptors can be serialized if feature serde is enabled.
+- [X] Optional mio support
 
 ## TODO
 
 When I started this project I was new in Rust. Some stuff will change.
 
- - [X] serde should be optional feature
- - [ ] USBCore should be done as trait(s) for easier porting to other platforms.
- - [X] Fix possible leak in sync_respond()
+ - [ ] Cleanup traits implementations for easier port to other platforms
+ - [X] Use valgrind to cleanup possible leaks in unsafe code (eg mmap etc...
  - [ ] Add isochronous support
+ - [ ] Add interrupt endpoints
  - [X] Use log crate instead of eprintln and println for debug.
- - [ ] Some functions prints errors those should be passed as results
- - [ ] claim_interface will panic if kernel driver is loaded since unload driver is not implemented.
+ - [ ] claim_interface will panic if kernel driver is loaded since unload driver is not implemented cant test so not implemented feel free to send patch if needed.
 
 ### For those who use any of below platforms, feel free to send a pull request:
 
