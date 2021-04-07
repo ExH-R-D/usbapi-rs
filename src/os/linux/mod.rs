@@ -4,3 +4,4 @@ pub mod enumerate;
 pub mod mio;
 pub mod usb_device;
 pub mod usbfs;
+mod usbfsurb;

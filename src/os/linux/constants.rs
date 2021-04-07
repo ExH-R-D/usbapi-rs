@@ -42,7 +42,3 @@ pub const RECIPIENT_OTHER: u8 = 0x03;
 pub const REQUEST_TYPE_STANDARD: u8 = 0x00 << 5;
 #[allow(dead_code)]
 pub const REQUEST_TYPE_CLASS: u8 = 0x01 << 5;
-#[allow(dead_code)]
-pub const ENDPOINT_IN: u8 = 0x80;
-#[allow(dead_code)]
-pub const ENDPOINT_OUT: u8 = 0x00;

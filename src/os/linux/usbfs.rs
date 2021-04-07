@@ -1,21 +1,20 @@
-use super::constants::*;
-use crate::usb_transfer::{ControlTransfer, UsbCoreTransfer, UsbTransfer};
+use super::usbfsurb::*;
+use crate::endpoint::Endpoint;
+use crate::usb_transfer::*;
 use crate::TimeoutMillis;
 use crate::UsbDevice;
 use nix::*;
-use std::collections::HashMap;
 use std::ffi::CStr;
-use std::fmt;
-use std::fs::OpenOptions;
 use std::io;
+use std::io::Write;
 use std::io::{Error, ErrorKind};
 use std::mem;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::prelude::*;
 use std::ptr;
 use std::time::{Duration, Instant};
 
 const CONTROL_MAX_PACKET_SIZE: u16 = 1024;
-const CONTROL_MAX_PACKET_SIZE_WITH_HEADER: u16 = CONTROL_MAX_PACKET_SIZE + 8;
 #[macro_export]
 macro_rules! ioctl_read_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
@@ -80,7 +79,7 @@ union UrbUnion {
 // Sync bulk transfer
 #[derive(Debug)]
 #[repr(C)]
-pub struct BulkTransfer {
+pub struct CBulkTransfer {
     ep: u32,
     length: u32,
     timeout_ms: u32,
@@ -91,16 +90,14 @@ pub struct UsbFs {
     pub(crate) handle: std::fs::File,
     claims: Vec<u32>,
     capabilities: u32,
-    urbs: HashMap<u8, UsbFsUrb>,
+    transfers: Vec<TransferKind>,
     pub(crate) bus_dev: (u8, u8),
     descriptors: Option<UsbDevice>,
     read_only: bool,
-    // Memory map for control channel
-    map_control: *mut u8,
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
-ioctl_readwrite_ptr!(usb_bulk_transfer, b'U', 2, BulkTransfer);
+ioctl_readwrite_ptr!(usb_bulk_transfer, b'U', 2, CBulkTransfer);
 ioctl_read_ptr!(usb_set_interface, b'U', 4, UsbFsSetInterface);
 ioctl_write_ptr!(usb_get_driver, b'U', 8, UsbFsGetDriver);
 ioctl_read_ptr!(usb_submit_urb, b'U', 10, UsbFsUrb);
@@ -111,104 +108,38 @@ ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
 ioctl_none!(usb_reset, b'U', 20);
 
-#[derive(Debug)]
-#[repr(C)]
-pub struct UsbFsUrb {
-    typ: u8,
-    endpoint: u8,
-    pub status: i32,
-    flags: u32,
-    pub buffer: *mut u8,
-    pub buffer_length: i32,
-    pub actual_length: i32,
-    start_frame: i32,
-    // FIXMEUNION
-    stream_id: i32,
-    // UNION end...
-    error_count: i32,
-    signr: u32,
-    usercontext: *mut u8,
-}
-
-impl UsbFsUrb {
-    pub fn new(typ: u8, ep: u8, ptr: *mut u8, length: usize) -> Self {
-        UsbFsUrb {
-            typ,
-            endpoint: ep,
-            status: 0,
-            flags: 0,
-            buffer: ptr,
-            buffer_length: length as i32,
-            actual_length: 0,
-            start_frame: 0,
-            stream_id: 0,
-            error_count: 0,
-            signr: 0,
-            usercontext: ptr::null_mut(),
-        }
+impl UsbCoreDriver for UsbFs {
+    // Create a new BulkTransfer for reading
+    // buffer_capacity tells how much we want to allocate for the read buffer
+    // Example:
+    // ```let transfer = usb.new_bulk_in(0x01, 64)?;
+    // usb.submit_bulk(transfer);
+    // ```
+    fn new_bulk_in(&mut self, ep: u8, buffer_capacity: usize) -> io::Result<BulkTransfer> {
+        let ptr = self.mmap(buffer_capacity)?;
+        Ok(BulkTransfer::input(ep, ptr, buffer_capacity, Self::munmap))
     }
 
-    pub fn control_data_as_ref<'a>(&self) -> &'a [u8] {
-        if self.actual_length > self.buffer_length {
-            panic!("Something is smoking actual_length > buffer_length? Please report this as a BUG ASAP");
-        } else if self.actual_length == 0 {
-            return &[];
-        }
-        &self.buffer_from_raw()[8..8 + self.actual_length as usize]
-    }
-}
-
-impl fmt::Display for UsbFsUrb {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "type: 0x{:02X}", self.typ)?;
-        writeln!(f, "endpoint: 0x{:02X}", self.endpoint)?;
-        writeln!(f, "status: 0x{0:08X} == {0}", self.status)?;
-        writeln!(f, "flags: 0x{:08X}", self.flags)?;
-        writeln!(f, "buffer: {:X?}", self.buffer)?;
-        writeln!(f, "buffer_length: {}", self.buffer_length)?;
-        writeln!(f, "actual_length: {}", self.actual_length)?;
-        writeln!(f, "start_frame: {}", self.start_frame)?;
-        writeln!(f, "stream_id: {}", self.stream_id)?;
-        writeln!(f, "signr: {}", self.signr)?;
-        writeln!(f, "usercontext: {:X?}", self.usercontext)
-    }
-}
-
-impl UsbTransfer<UsbFsUrb> for UsbFsUrb {
-    fn buffer_from_raw_mut<'a>(&self) -> &'a mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.buffer, self.buffer_length as usize) }
+    // Create a new BulkTransfer for reading
+    // buffer_capacity tells how much we want to allocate for the read buffer
+    // Example:
+    // ```let transfer = usb.new_bulk_in(0x01, 64)?;
+    // usb.submit_bulk(transfer);
+    // ```
+    fn new_bulk_out(&mut self, ep: u8, buffer_capacity: usize) -> io::Result<BulkTransfer> {
+        let ptr = self.mmap(buffer_capacity)?;
+        Ok(BulkTransfer::output(ep, ptr, buffer_capacity, Self::munmap))
     }
 
-    fn buffer_from_raw<'a>(&self) -> &'a [u8] {
-        unsafe {
-            if (self.endpoint & ENDPOINT_IN) == ENDPOINT_IN {
-                std::slice::from_raw_parts(self.buffer, self.actual_length as usize)
-            } else {
-                std::slice::from_raw_parts(self.buffer, self.buffer_length as usize)
-            }
-        }
-    }
-}
-
-impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
-    fn new_bulk(&mut self, ep: u8, size: usize) -> io::Result<UsbFsUrb> {
-        let ptr = self.mmap(size)?;
-        Ok(UsbFsUrb::new(USBFS_URB_TYPE_BULK, ep, ptr, size))
-    }
-
-    fn new_interrupt(&mut self, ep: u8, size: usize) -> io::Result<UsbFsUrb> {
-        let ptr = self.mmap(size)?;
-        Ok(UsbFsUrb::new(USBFS_URB_TYPE_INTERRUPT, ep, ptr, size))
-    }
-
-    fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<UsbFsUrb> {
-        let ptr = self.mmap(size)?;
-        Ok(UsbFsUrb::new(USBFS_URB_TYPE_ISO, ep, ptr, size))
-    }
-
-    fn new_control(&mut self, ep: u8, mut ctl: ControlTransfer) -> io::Result<UsbFsUrb> {
-        let length = 8 + ctl.buffer_length;
-        if length > CONTROL_MAX_PACKET_SIZE_WITH_HEADER {
+    fn new_control(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        buffer_capacity: u16,
+    ) -> io::Result<ControlTransfer> {
+        if buffer_capacity > CONTROL_MAX_PACKET_SIZE {
             return Err(Error::new(
                 ErrorKind::Other,
                 format!(
@@ -217,36 +148,30 @@ impl UsbCoreTransfer<UsbFsUrb> for UsbFs {
                 ),
             ));
         }
-        let p = if self.map_control.is_null() {
-            self.mmap(CONTROL_MAX_PACKET_SIZE_WITH_HEADER as usize)?
-        } else {
-            self.map_control
-        };
+        let length = buffer_capacity + 8;
+        let p = self.mmap(buffer_capacity as usize + 8)?;
         let p = unsafe {
-            *p.add(0) = ctl.request_type;
-            *p.add(1) = ctl.request;
-            *p.add(2) = (ctl.value & 0x00FF) as u8;
-            *p.add(3) = (ctl.value >> 8) as u8;
-            *p.add(4) = (ctl.index & 0x00FF) as u8;
-            *p.add(5) = (ctl.index >> 8) as u8;
-            *p.add(6) = (ctl.buffer_length & 0x00FF) as u8;
-            *p.add(7) = (ctl.buffer_length >> 8) as u8;
+            *p.add(0) = request_type;
+            *p.add(1) = request;
+            *p.add(2) = (value & 0x00FF) as u8;
+            *p.add(3) = (value >> 8) as u8;
+            *p.add(4) = (index & 0x00FF) as u8;
+            *p.add(5) = (index >> 8) as u8;
+            *p.add(6) = (buffer_capacity & 0x00FF) as u8;
+            *p.add(7) = (buffer_capacity >> 8) as u8;
             p
         };
+        Ok(ControlTransfer::new(p, length, length, Self::munmap))
+    }
 
-        if let Some(v) = ctl.buffer.take() {
-            for (i, byte) in v.iter().enumerate() {
-                unsafe {
-                    *p.add(i + 8) = *byte;
-                }
-            }
-        }
-        Ok(UsbFsUrb::new(
-            USBFS_URB_TYPE_CONTROL,
-            ep,
-            p,
-            length as usize,
-        ))
+    fn new_control_nodata(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+    ) -> io::Result<ControlTransfer> {
+        self.new_control(request_type, request, value, index, 0)
     }
 }
 
@@ -257,18 +182,24 @@ impl UsbFs {
 
     /// This is used when read file descriptor strings.
     pub fn from_bus_device_read_only(bus: u8, dev: u8) -> io::Result<UsbFs> {
+        use nix::fcntl::OFlag;
+        let path = format!("/dev/bus/usb/{:03}/{:03}", bus, dev);
+        let path = std::path::Path::new(&path);
+        let handle = nix::fcntl::open(
+            path,
+            OFlag::O_RDONLY | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|_| io::Error::last_os_error())?;
+
         let mut res = UsbFs {
-            handle: OpenOptions::new()
-                .read(true)
-                .write(false)
-                .open(format!("/dev/bus/usb/{:03}/{:03}", bus, dev))?,
+            handle: unsafe { std::fs::File::from_raw_fd(handle) },
             claims: vec![],
             capabilities: 0,
-            urbs: HashMap::new(),
+            transfers: Vec::new(),
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: true,
-            map_control: std::ptr::null_mut(),
         };
 
         res.descriptors();
@@ -277,27 +208,29 @@ impl UsbFs {
     }
 
     pub fn from_bus_device(bus: u8, dev: u8) -> io::Result<UsbFs> {
-        let mut res = UsbFs {
-            handle: OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(format!("/dev/bus/usb/{:03}/{:03}", bus, dev))?,
+        use nix::fcntl::OFlag;
+        let path = format!("/dev/bus/usb/{:03}/{:03}", bus, dev);
+        let path = std::path::Path::new(&path);
+        let handle = nix::fcntl::open(
+            path,
+            OFlag::O_RDWR | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|_| io::Error::last_os_error())?;
+
+        let res = UsbFs {
+            handle: unsafe { std::fs::File::from_raw_fd(handle) },
             claims: vec![],
             capabilities: 0,
-            urbs: HashMap::new(),
+            transfers: Vec::new(),
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: false,
-            map_control: std::ptr::null_mut(),
         };
 
-        res.descriptors();
+        // res.descriptors();
 
         Ok(res)
-    }
-
-    pub(crate) fn handle(&self) -> &std::fs::File {
-        &self.handle
     }
 
     pub fn reset(&mut self) -> io::Result<()> {
@@ -306,6 +239,10 @@ impl UsbFs {
             Err(_) => Err(io::Error::last_os_error()),
             Ok(_) => Ok(()),
         }
+    }
+
+    pub fn handle(&self) -> &std::fs::File {
+        &self.handle
     }
 
     pub fn descriptors(&mut self) -> &Option<UsbDevice> {
@@ -333,34 +270,70 @@ impl UsbFs {
     /// Example:
     /// ```
     /// let mut urb = usb.new_bulk(1, 64);
+    /// // poll then
     /// let urb = usb.async_response()
+    /// match transfer {
+    ///    Ok(transfer) => { // do stuff }
+    ///    Err(e) if e.kind() == ErrorKind::WouldBlock => {},
+    ///    Err(e) => { return Err(e); }
+    /// }
     /// ```
-    /// The returned URB can be reused
-    pub fn async_response(&mut self) -> io::Result<UsbFsUrb> {
+    /// The returned Transfer can be reused after call transfer.flush()
+    pub fn async_response(&mut self) -> io::Result<TransferKind> {
         let urb: *mut UsbFsUrb = ptr::null_mut();
         let urb = unsafe {
             let _ = usb_reapurbndelay(self.handle.as_raw_fd(), &urb)
                 .map_err(|_| io::Error::last_os_error())?;
             if urb.is_null() {
-                panic!("urb must not be null something is buggy send bug report to usbapi-rs developer");
+                panic!("URB must not be null something is buggy send bug report to usbapi-rs developer");
             }
-            &*urb
-        };
-        let surb = match self.urbs.remove(&urb.endpoint) {
-            Some(mut u) => {
-                u.status = urb.status;
-                u.actual_length = urb.actual_length;
-                u
-            }
-            None => {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("Endpoint: {} not exists in hashmap?", urb.endpoint),
-                ));
-            }
+            Box::from_raw(urb)
         };
 
-        Ok(surb)
+        let ep = Endpoint::new(urb.endpoint);
+        if ep.is_bulk() {
+            Ok(TransferKind::Bulk(bulk_from_urb(*urb)?))
+        } else if ep.is_control() {
+            Ok(TransferKind::Control(control_from_urb(*urb)?))
+        } else {
+            Ok(TransferKind::Invalid(ep))
+        }
+    }
+
+    /// Read all URB responses if there are any pending and store it in transfers
+    /// Should be called after mio poll if there is any pending usb_submit's.
+    /// The TransferKind is stored in transfers and can be read using
+    /// collect_responses()
+    ///
+    /// Example usage:
+    /// ```
+    /// usb.submit_bulk(bulk);
+    /// poll.poll(&mut events, Duration::from_secs(1))?;
+    /// if !events.is_empty() {
+    ///     usb.async_response_all()?;
+    ///     for transfer in usb.collect_responses() { // Do stuff }
+    /// }
+    /// ```
+    ///
+    pub fn async_response_all(&mut self) -> std::io::Result<usize> {
+        loop {
+            match self.async_response() {
+                Ok(transfer) => {
+                    self.transfers.push(transfer);
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    return Ok(self.transfers.len());
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    /// Take all bulk/control responses
+    pub fn collect_responses(&mut self) -> Vec<TransferKind> {
+        self.transfers.drain(..).collect()
     }
 
     /// Claim interface
@@ -423,7 +396,7 @@ impl UsbFs {
     /// Consider use @async_transfer() instead.
     pub fn bulk_read(&self, ep: u8, mem: &mut [u8], timeout: TimeoutMillis) -> io::Result<u32> {
         self.bulk(
-            0x80 | ep,
+            Endpoint::bulk_in(ep).into(),
             mem.as_mut_ptr() as *mut libc::c_void,
             mem.len() as u32,
             timeout,
@@ -448,22 +421,15 @@ impl UsbFs {
         length: u32,
         timeout: TimeoutMillis,
     ) -> io::Result<u32> {
-        let mut bulk = BulkTransfer {
+        let mut bulk = CBulkTransfer {
             ep: ep as u32,
             length,
             timeout_ms: timeout.0,
             data: mem,
         };
 
-        // wait what??
         let res = unsafe { usb_bulk_transfer(self.handle.as_raw_fd(), &mut bulk) }
             .map_err(|_| io::Error::last_os_error())?;
-        // Note! ioctl return -1 on IO error...
-        if res < 0 {
-            return Err(io::Error::from_raw_os_error(
-                nix::Error::last().as_errno().unwrap() as i32,
-            ));
-        }
         Ok(res as u32)
     }
 
@@ -486,15 +452,16 @@ impl UsbFs {
                 "Can't read descriptors since has been open as ready only",
             ));
         }
-        match self.control_async_wait(ControlTransfer::new_read(
-            0x80,
-            0x06,
-            0x0300 | id as u16,
-            iface,
-            256,
-            TimeoutMillis::from(100),
-        )) {
-            Ok(data) => {
+        let ctrl = self.new_control(
+            0x80,               // request_type
+            0x06,               // request
+            0x0300 | id as u16, // value
+            iface,              // index
+            256,                // Max read
+        )?;
+        match self.control_async_wait(ctrl, TimeoutMillis::from(100)) {
+            Ok(control) => {
+                let data = control.buffer_from_raw();
                 let length = data.len();
                 if length % 2 != 0 || length <= 2 {
                     log::error!(
@@ -540,38 +507,87 @@ impl UsbFs {
         Ok(ptr)
     }
 
+    fn munmap(mem: *mut u8, size: usize) {
+        unsafe {
+            libc::munmap(mem as *mut libc::c_void, size);
+        };
+    }
+
     /// Send a async transfer
     /// It is up to the enduser to poll the file descriptor for a result.
-    pub fn async_transfer(&mut self, urb: UsbFsUrb) -> io::Result<i32> {
-        if self.urbs.get(&urb.endpoint).is_some() {
-            return Err(Error::new(
-                ErrorKind::AlreadyExists,
-                format!("Endpoint {} pending", urb.endpoint),
-            ));
-        }
-        let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &urb) }
+    fn submit_urb(&mut self, urb: Box<UsbFsUrb>) -> io::Result<i32> {
+        let urb: *mut UsbFsUrb = Box::into_raw(urb);
+
+        let res = unsafe { usb_submit_urb(self.handle.as_raw_fd(), &*urb) }
             .map_err(|_| io::Error::last_os_error())?;
-        self.urbs.insert(urb.endpoint, urb);
         Ok(res)
     }
 
-    pub fn control_async_wait(&mut self, ctrl: ControlTransfer) -> io::Result<Vec<u8>> {
-        let timeout_ms = ctrl.timeout.0;
-        let asc = self.new_control(0, ctrl)?;
-        self.async_transfer(asc)?;
+    /// Submit a new bulk transfer this will not block.
+    /// One shall call mio poll and async_response(_all) after this call to get the transfer back
+    /// Note that if the transfer is reused the user must call flush() and fill it with data
+    /// before submit_bulk.
+    /// Example:
+    ///
+    /// ```
+    /// bulk_out.flush()?;
+    /// bulk.write_all(&b"HELLO\n")?;
+    /// usb.submit_bulk(bulk);
+    /// // poll
+    /// resp = usb.async_response();
+    /// match resp { // do stuff }
+    /// ```
+    pub fn submit_bulk(&mut self, bulk: BulkTransfer) -> io::Result<i32> {
+        if bulk.actual_length != 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Make sure call flush() before call submit bulk when reuse a transfer.",
+            ));
+        }
+        let urb = Box::new(UsbFsUrb::from(bulk));
+        self.submit_urb(urb)
+    }
+
+    /// Submit a new control transfer this will not block.
+    /// One shall call mio poll and async_response(_all) after this call to get the transfer back
+    /// Note that if the transfer is reused the user must call flush() before pass it to
+    /// submit_control.
+    pub fn submit_control(&mut self, control: ControlTransfer) -> io::Result<i32> {
+        if control.actual_length != 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Make sure call flush() before call submit_control when reuse a transfer.",
+            ));
+        }
+        let urb = Box::new(UsbFsUrb::from(control));
+        self.submit_urb(urb)
+    }
+
+    /// Wait for control response up to timeout ms.
+    /// If it find other transfers those are stored in transfers
+    /// and can be read using responses()
+    pub fn control_async_wait(
+        &mut self,
+        ctrl: ControlTransfer,
+        timeout_ms: TimeoutMillis,
+    ) -> io::Result<ControlTransfer> {
+        let timeout_ms = timeout_ms.0;
+        self.submit_control(ctrl)?;
         let instant = Instant::now();
         loop {
             match self.async_response() {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_micros(10));
+                    std::thread::sleep(Duration::from_micros(1));
                 }
                 Err(e) => {
                     return Err(e);
                 }
-                Ok(urb) => {
-                    let data = Vec::from(urb.control_data_as_ref());
-                    return Ok(data);
-                }
+                Ok(transfer) => match transfer {
+                    TransferKind::Control(control) => {
+                        return Ok(control);
+                    }
+                    _ => self.transfers.push(transfer),
+                },
             }
             if instant.elapsed() >= Duration::from_millis(timeout_ms as u64) {
                 return Err(Error::new(ErrorKind::TimedOut, ""));
@@ -584,15 +600,6 @@ impl Drop for UsbFs {
     fn drop(&mut self) {
         for claim in &self.claims {
             if self.release_interface(*claim).is_ok() {};
-        }
-
-        if !self.map_control.is_null() {
-            unsafe {
-                libc::munmap(
-                    self.map_control as *mut libc::c_void,
-                    CONTROL_MAX_PACKET_SIZE_WITH_HEADER as usize,
-                );
-            };
         }
     }
 }

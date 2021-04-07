@@ -1,82 +1,233 @@
-use crate::TimeoutMillis;
+use crate::endpoint::Endpoint;
+use std::fmt;
 use std::io;
-#[derive(Clone, Debug)]
+use std::io::Write;
+use std::io::{Error, ErrorKind};
+
+type Deallocate = Box<dyn Fn(*mut u8, usize) + 'static>;
+
 pub struct ControlTransfer {
-    pub request_type: u8,
-    pub request: u8,
-    pub value: u16,
-    pub index: u16,
-    pub buffer_length: u16,
-    pub timeout: TimeoutMillis,
-    pub buffer: Option<Vec<u8>>,
+    pub buffer: *mut u8,
+    // buffer length is the value sent to kernel
+    pub(crate) buffer_length: u16,
+    // capacity of the buffer needed when call deallocator
+    pub(crate) buffer_capacity: u16,
+    // given back from kernel
+    pub(crate) actual_length: u16,
+    deallocate: Deallocate,
+}
+
+impl fmt::Display for ControlTransfer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "|Control|{}|{}|{}|",
+            self.buffer_length, self.actual_length, self.buffer_capacity
+        )
+    }
 }
 
 impl ControlTransfer {
-    pub fn new_nodata(
-        request_type: u8,
-        request: u8,
-        value: u16,
-        index: u16,
-        timeout: TimeoutMillis,
-    ) -> Self {
-        ControlTransfer {
-            request_type,
-            request,
-            value,
-            index,
-            buffer_length: 0,
-            buffer: None,
-            timeout,
-        }
-    }
-
-    pub fn new_read(
-        request_type: u8,
-        request: u8,
-        value: u16,
-        index: u16,
+    // Buffer to store header + body
+    pub fn new<DEALOC>(
+        buffer: *mut u8,
+        buffer_capacity: u16,
         buffer_length: u16,
-        timeout: TimeoutMillis,
-    ) -> Self {
-        ControlTransfer {
-            request_type,
-            request,
-            value,
-            index,
+        deallocate: DEALOC,
+    ) -> Self
+    where
+        DEALOC: Fn(*mut u8, usize) + 'static,
+    {
+        Self {
+            buffer,
             buffer_length,
-            buffer: None,
-            timeout,
-        }
-    }
-
-    pub fn new_with_data(
-        request_type: u8,
-        request: u8,
-        value: u16,
-        index: u16,
-        v: Vec<u8>,
-        timeout: TimeoutMillis,
-    ) -> Self {
-        ControlTransfer {
-            request_type,
-            request,
-            value,
-            index,
-            buffer_length: v.len() as u16,
-            buffer: Some(v),
-            timeout,
+            buffer_capacity,
+            actual_length: 0,
+            deallocate: Box::new(deallocate),
         }
     }
 }
 
-pub trait UsbTransfer<T> {
-    fn buffer_from_raw_mut<'a>(&self) -> &'a mut [u8];
+impl Drop for ControlTransfer {
+    fn drop(&mut self) {
+        if !self.buffer.is_null() {
+            (self.deallocate)(self.buffer, self.buffer_capacity as usize);
+        }
+    }
+}
+
+impl Write for ControlTransfer {
+    fn write(&mut self, inbuf: &[u8]) -> io::Result<usize> {
+        let buf = unsafe {
+            let buf = self.buffer;
+            std::slice::from_raw_parts_mut(
+                buf.offset(self.buffer_length as isize + 8),
+                self.buffer_capacity as usize - self.buffer_length as usize - 8,
+            )
+        };
+
+        for (i, byte) in inbuf.iter().enumerate() {
+            buf[i] = *byte;
+            self.buffer_length += 1;
+        }
+        Ok(inbuf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.actual_length = 0;
+        Ok(())
+    }
+}
+
+pub struct BulkTransfer {
+    pub(crate) buffer: *mut u8,
+    // Lower layer write or read length
+    pub buffer_length: usize,
+    pub actual_length: usize,
+    pub status: i32,
+    // allocedata size
+    pub buffer_capacity: usize,
+    pub endpoint: Endpoint,
+    // give back allocated memory
+    deallocate: Deallocate,
+}
+
+impl fmt::Display for BulkTransfer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "|{}|{}|{}|{}|",
+            self.endpoint, self.buffer_length, self.actual_length, self.buffer_capacity
+        )
+    }
+}
+
+impl BulkTransfer {
+    /// Create new bulk input (Read)
+    /// the deallocate is called when BulkTransfer goes out of scope to cleanup
+    /// allocated memory
+    pub fn input<DEALOC>(
+        ep: u8,
+        buffer: *mut u8,
+        buffer_capacity: usize,
+        deallocate: DEALOC,
+    ) -> Self
+    where
+        DEALOC: Fn(*mut u8, usize) + 'static,
+    {
+        Self {
+            buffer,
+            buffer_capacity,
+            buffer_length: buffer_capacity,
+            actual_length: 0,
+            status: 0,
+            endpoint: Endpoint::bulk_in(ep),
+            deallocate: Box::new(deallocate),
+        }
+    }
+
+    /// Create a write
+    pub fn output<DEALOC>(
+        ep: u8,
+        buffer: *mut u8,
+        buffer_capacity: usize,
+        deallocate: DEALOC,
+    ) -> Self
+    where
+        DEALOC: Fn(*mut u8, usize) + 'static,
+    {
+        Self {
+            buffer,
+            buffer_capacity,
+            buffer_length: 0, // incremented when we put data in the buffer
+            actual_length: 0,
+            status: 0,
+            endpoint: Endpoint::bulk_out(ep),
+            deallocate: Box::new(deallocate),
+        }
+    }
+}
+
+impl Drop for BulkTransfer {
+    fn drop(&mut self) {
+        if !self.buffer.is_null() {
+            (self.deallocate)(self.buffer, self.buffer_capacity);
+        }
+    }
+}
+
+impl Write for BulkTransfer {
+    fn write(&mut self, inbuf: &[u8]) -> io::Result<usize> {
+        if self.endpoint.is_bulk_in() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Can not write to an bulk in endpoint.",
+            ));
+        }
+        let buf = unsafe {
+            let buf = self.buffer;
+            std::slice::from_raw_parts_mut(
+                buf.offset(self.buffer_length as isize),
+                self.buffer_capacity - self.buffer_length,
+            )
+        };
+        assert!(!buf.is_empty());
+
+        for (i, byte) in inbuf.iter().enumerate() {
+            buf[i] = *byte;
+            self.buffer_length += 1;
+        }
+        Ok(inbuf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.actual_length = 0;
+        if self.endpoint.is_bulk_out() {
+            self.buffer_length = 0;
+        }
+        Ok(())
+    }
+}
+
+pub enum TransferKind {
+    Control(ControlTransfer),
+    Bulk(BulkTransfer),
+    Invalid(Endpoint),
+}
+
+impl fmt::Display for TransferKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TransferKind::Control(control) => write!(f, "Control Transfer: {}", control),
+            TransferKind::Bulk(bulk) => write!(f, "Control Transfer: {}", bulk),
+            TransferKind::Invalid(ep) => write!(f, "Invalid {}", ep),
+        }
+    }
+}
+
+pub trait BufferSlice {
     fn buffer_from_raw<'a>(&self) -> &'a [u8];
 }
 
-pub trait UsbCoreTransfer<T> {
-    fn new_bulk(&mut self, ep: u8, size: usize) -> io::Result<T>;
-    fn new_interrupt(&mut self, ep: u8, size: usize) -> io::Result<T>;
-    fn new_isochronous(&mut self, ep: u8, size: usize) -> io::Result<T>;
-    fn new_control(&mut self, ep: u8, ctl: ControlTransfer) -> io::Result<T>;
+pub trait UsbCoreDriver {
+    fn new_bulk_in(&mut self, ep: u8, read_capacity: usize) -> io::Result<BulkTransfer>;
+    fn new_bulk_out(&mut self, ep: u8, capacity: usize) -> io::Result<BulkTransfer>;
+
+    // Create a new control
+    fn new_control(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        buffer_capacity: u16,
+    ) -> io::Result<ControlTransfer>;
+    // Create a new control
+    fn new_control_nodata(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+    ) -> io::Result<ControlTransfer>;
 }
