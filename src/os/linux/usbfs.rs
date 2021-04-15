@@ -107,6 +107,7 @@ ioctl_read_ptr!(usb_release_interface, b'U', 16, u32);
 ioctl_readwrite_ptr!(usb_ioctl, b'U', 18, UsbFsIoctl);
 ioctl_read!(usb_get_capabilities, b'U', 26, u32);
 ioctl_none!(usb_reset, b'U', 20);
+ioctl_read!(usb_clear_halt, b'U', 21, u32);
 
 impl UsbCoreDriver for UsbFs {
     // Create a new BulkTransfer for reading
@@ -227,6 +228,16 @@ impl UsbFs {
 
     pub fn reset(&mut self) -> io::Result<()> {
         let res = unsafe { usb_reset(self.handle.as_raw_fd()) };
+        match res {
+            Err(_) => Err(io::Error::last_os_error()),
+            Ok(_) => Ok(()),
+        }
+    }
+
+    pub fn clear_halt(&mut self,ep:u8) -> io::Result<()> {
+        let res = unsafe {
+            let mut ep32 = (ep & 0x7f) as u32;
+            usb_clear_halt(self.handle.as_raw_fd(),&mut ep32) };
         match res {
             Err(_) => Err(io::Error::last_os_error()),
             Ok(_) => Ok(()),
