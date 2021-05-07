@@ -234,10 +234,11 @@ impl UsbFs {
         }
     }
 
-    pub fn clear_halt(&mut self,ep:u8) -> io::Result<()> {
+    pub fn clear_halt(&mut self, ep: u8) -> io::Result<()> {
         let res = unsafe {
             let mut ep32 = (ep & 0x7f) as u32;
-            usb_clear_halt(self.handle.as_raw_fd(),&mut ep32) };
+            usb_clear_halt(self.handle.as_raw_fd(), &mut ep32)
+        };
         match res {
             Err(_) => Err(io::Error::last_os_error()),
             Ok(_) => Ok(()),
@@ -492,21 +493,22 @@ impl UsbFs {
 
     fn mmap(&mut self, length: usize) -> io::Result<*mut u8> {
         let ptr = unsafe {
-            libc::mmap(
+            let ptr = libc::mmap(
                 ptr::null_mut(),
                 length as libc::size_t,
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_SHARED,
                 self.handle.as_raw_fd(),
                 0,
-            )
+            );
+            if ptr == libc::MAP_FAILED {
+                return Err(io::Error::from_raw_os_error(
+                    nix::errno::Errno::ENOMEM as i32,
+                ));
+            }
+            ptr
         } as *mut u8;
 
-        if ptr.is_null() {
-            return Err(io::Error::from_raw_os_error(
-                nix::errno::Errno::ENOMEM as i32,
-            ));
-        }
         Ok(ptr)
     }
 
