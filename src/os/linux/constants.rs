@@ -13,9 +13,10 @@ pub(crate) const USBFS_CAP_MMAP: u8 = 0x20;
 #[allow(dead_code)]
 pub(crate) const USBFS_CAP_DROP_PRIVILEGES: u8 = 0x40;
 
-pub(crate) const USBFS_URB_TYPE_ISO: u8 = 0;
-pub(crate) const USBFS_URB_TYPE_INTERRUPT: u8 = 1;
 #[allow(dead_code)]
+pub(crate) const USBFS_URB_TYPE_ISO: u8 = 0;
+#[allow(dead_code)]
+pub(crate) const USBFS_URB_TYPE_INTERRUPT: u8 = 1;
 pub(crate) const USBFS_URB_TYPE_CONTROL: u8 = 2;
 pub(crate) const USBFS_URB_TYPE_BULK: u8 = 3;
 

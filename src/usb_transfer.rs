@@ -166,7 +166,7 @@ impl Write for BulkTransfer {
         let buf = unsafe {
             let buf = self.buffer;
             std::slice::from_raw_parts_mut(
-                buf.offset(self.buffer_length as isize),
+                buf.add(self.buffer_length),
                 self.buffer_capacity - self.buffer_length,
             )
         };
