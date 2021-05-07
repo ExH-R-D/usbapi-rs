@@ -117,8 +117,8 @@ impl UsbCoreDriver for UsbFs {
     // usb.submit_bulk(transfer);
     // ```
     fn new_bulk_in(&mut self, ep: u8, buffer_capacity: usize) -> io::Result<BulkTransfer> {
-        let ptr = self.mmap(buffer_capacity)?;
-        Ok(BulkTransfer::input(ep, ptr, buffer_capacity, Self::munmap))
+        let (ptr, deallocate) = self.mmap(buffer_capacity)?;
+        Ok(BulkTransfer::input(ep, ptr, buffer_capacity, deallocate))
     }
 
     // Create a new BulkTransfer for reading
@@ -128,8 +128,8 @@ impl UsbCoreDriver for UsbFs {
     // usb.submit_bulk(transfer);
     // ```
     fn new_bulk_out(&mut self, ep: u8, buffer_capacity: usize) -> io::Result<BulkTransfer> {
-        let ptr = self.mmap(buffer_capacity)?;
-        Ok(BulkTransfer::output(ep, ptr, buffer_capacity, Self::munmap))
+        let (ptr, deallocate) = self.mmap(buffer_capacity)?;
+        Ok(BulkTransfer::output(ep, ptr, buffer_capacity, deallocate))
     }
 
     fn new_control(
@@ -151,8 +151,8 @@ impl UsbCoreDriver for UsbFs {
         }
 
         let capacity_length = length as usize + 8;
-        let p = self.mmap(capacity_length)?;
-        let mut ctrl = ControlTransfer::new(p, capacity_length as u16, 0, Self::munmap);
+        let (p, deallocate) = self.mmap(capacity_length)?;
+        let mut ctrl = ControlTransfer::new(p, capacity_length as u16, 0, deallocate);
         ctrl.write_all(&[
             request_type,
             request,
@@ -491,7 +491,7 @@ impl UsbFs {
         }
     }
 
-    fn mmap(&mut self, length: usize) -> io::Result<*mut u8> {
+    fn mmap(&mut self, length: usize) -> io::Result<(*mut u8, Deallocate)> {
         let ptr = unsafe {
             let ptr = libc::mmap(
                 ptr::null_mut(),
@@ -502,14 +502,24 @@ impl UsbFs {
                 0,
             );
             if ptr == libc::MAP_FAILED {
-                return Err(io::Error::from_raw_os_error(
-                    nix::errno::Errno::ENOMEM as i32,
-                ));
+                let ptr = libc::malloc(length);
+                if ptr.is_null() {
+                    return Err(io::Error::from_raw_os_error(
+                        nix::errno::Errno::ENOMEM as i32,
+                    ));
+                }
+                return Ok((ptr as *mut u8, Box::new(Self::free)));
             }
             ptr
         } as *mut u8;
 
-        Ok(ptr)
+        Ok((ptr, Box::new(Self::munmap)))
+    }
+
+    fn free(mem: *mut u8, _size: usize) {
+        unsafe {
+            libc::free(mem as *mut libc::c_void);
+        }
     }
 
     fn munmap(mem: *mut u8, size: usize) {

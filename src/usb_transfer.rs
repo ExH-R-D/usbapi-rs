@@ -4,7 +4,7 @@ use std::io;
 use std::io::Write;
 use std::io::{Error, ErrorKind};
 
-type Deallocate = Box<dyn Fn(*mut u8, usize) + 'static>;
+pub(crate) type Deallocate = Box<dyn Fn(*mut u8, usize) + 'static>;
 
 pub struct ControlTransfer {
     pub buffer: *mut u8,
