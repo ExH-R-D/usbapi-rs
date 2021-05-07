@@ -6,15 +6,15 @@ use std::slice::Iter;
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug)]
 pub struct Interface {
-    length: u8,
-    kind: u8,
-    interface_number: u8,
-    alternate_setting: u8,
-    num_endpoints: u8,
-    interface_class: u8,
-    interface_sub_class: u8,
-    interface_protocol: u8,
-    iinterface: u8,
+    pub length: u8,
+    pub kind: u8,
+    pub interface_number: u8,
+    pub alternate_setting: u8,
+    pub num_endpoints: u8,
+    pub interface_class: u8,
+    pub interface_sub_class: u8,
+    pub interface_protocol: u8,
+    pub iinterface: u8,
     pub endpoints: Vec<Endpoint>,
 }
 
