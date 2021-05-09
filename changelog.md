@@ -1,3 +1,7 @@
+# 0.4.1
+
+ - Fixed segmentation fault if mmap don't work and fallback to malloc in that case.
+
 # 0.4.0
 
  - The asynchronous transfer API's and control has been rewritten. Please use new_control_in/out instead of low level new_control.
