@@ -14,7 +14,7 @@ use std::os::unix::prelude::*;
 use std::ptr;
 use std::time::{Duration, Instant};
 
-const CONTROL_MAX_PACKET_SIZE: u16 = 1024;
+const CONTROL_MAX_PACKET_SIZE: u16 = 2048;
 #[macro_export]
 macro_rules! ioctl_read_ptr {
     ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (

@@ -90,6 +90,13 @@ impl UsbDevice {
                         }
                     }
                 }
+                DescriptorType::Unknown(kind) => {
+                    if let Some(c) = device.device.configurations.last_mut() {
+                        c.unknown_descriptors.push(kind);
+                    } else {
+                        log::warn!("Unknown descriptor given before configuration: {:?}", kind);
+                    }
+                }
                 _ => {
                     log::debug!("Unknown descriptor type: {:?}", kind);
                 }

@@ -15,6 +15,7 @@ pub struct Configuration {
     bmattributes: u8,
     max_power: u8,
     pub interfaces: Vec<Interface>,
+    pub unknown_descriptors: Vec<Vec<u8>>,
 }
 
 impl fmt::Display for Configuration {
@@ -30,6 +31,7 @@ impl fmt::Display for Configuration {
         for iface in &self.interfaces {
             d += &format!("{}", iface);
         }
+        d += &format!("Unknown: {:?}", self.unknown_descriptors);
         write!(f, "{}", d)
     }
 }
@@ -46,6 +48,7 @@ impl Configuration {
             bmattributes: *iter.next()?,
             max_power: *iter.next()?,
             interfaces: vec![],
+            unknown_descriptors: vec![],
         })
     }
 }
