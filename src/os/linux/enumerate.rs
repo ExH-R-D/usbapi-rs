@@ -9,7 +9,7 @@ impl TryFrom<UsbDevices> for UsbEnumerate {
     fn try_from(sysfs: UsbDevices) -> Result<Self, Self::Error> {
         let mut en = Self::default();
         for dev in sysfs.values() {
-            let dev = UsbDevice::from_bytes(dev.descriptors.clone(), |mut d| {
+            let dev = UsbDevice::from_bytes(dev.descriptors.clone(), |d| {
                 d.product = dev.product.clone();
                 d.manufacturer = dev.manufacturer.clone();
                 d.serial = dev.serial.clone();

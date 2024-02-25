@@ -108,7 +108,7 @@ impl UsbDevice {
     pub fn from_usbcore(usb: &mut UsbCore) -> Result<Self, std::io::Error> {
         let mut bytes = Vec::new();
         usb.handle().read_to_end(&mut bytes)?;
-        Self::from_bytes(bytes, |mut d| {
+        Self::from_bytes(bytes, |d| {
             d.bus_num = usb.bus_dev.0;
             d.dev_num = usb.bus_dev.1;
             d.manufacturer = usb
