@@ -94,6 +94,7 @@ pub struct UsbFs {
     pub(crate) bus_dev: (u8, u8),
     descriptors: Option<UsbDevice>,
     read_only: bool,
+    use_mmap: bool
 }
 
 ioctl_readwrite_ptr!(usb_control_transfer, b'U', 0, ControlTransfer);
@@ -193,6 +194,7 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: true,
+	    use_mmap: true
         };
 
         res.descriptors();
@@ -219,11 +221,16 @@ impl UsbFs {
             descriptors: None,
             bus_dev: (bus, dev),
             read_only: false,
+	    use_mmap: true
         };
 
         // res.descriptors();
 
         Ok(res)
+    }
+
+    pub fn set_use_mmap(&mut self, use_mmap: bool) {
+	self.use_mmap = use_mmap;
     }
 
     pub fn reset(&mut self) -> io::Result<()> {
@@ -493,14 +500,19 @@ impl UsbFs {
 
     fn mmap(&mut self, length: usize) -> io::Result<(*mut u8, Deallocate)> {
         let ptr = unsafe {
-            let ptr = libc::mmap(
-                ptr::null_mut(),
-                length as libc::size_t,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                self.handle.as_raw_fd(),
-                0,
-            );
+            let ptr =
+		if self.use_mmap {
+		    libc::mmap(
+			ptr::null_mut(),
+			length as libc::size_t,
+			libc::PROT_READ | libc::PROT_WRITE,
+			libc::MAP_SHARED,
+			self.handle.as_raw_fd(),
+			0,
+		    )
+		} else {
+		    libc::MAP_FAILED
+		};
             if ptr == libc::MAP_FAILED {
                 let ptr = libc::malloc(length);
                 if ptr.is_null() {
